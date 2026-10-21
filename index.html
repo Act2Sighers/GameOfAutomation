@@ -1,0 +1,235 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ガラクタ姫の異食レストラン</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+  /* レイアウト: 上に所持トニックの帯、中央に盤面、下に情報行と道具棚。ガラクタ置き場の夕暮れ一色で固定 */
+  :root {
+    --bg: #1e2225;
+    --panel: #2a2f33;
+    --panel-2: #353b40;
+    --line: #4a5258;
+    --fg: #efe6d2;
+    --muted: #a9a294;
+    --ruby: #c3123f;
+    --ruby-fg: #fff2f4;
+    --brass: #d6b44a;
+    --font-display: "DotGothic16", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    --font-body: "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+    --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 14px;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  button { font: inherit; color: inherit; }
+  button:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding-block: 8px;
+    padding-left: var(--gutter-l); padding-right: var(--gutter-r);
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
+    font-family: var(--font-display);
+    font-size: 15px; letter-spacing: 0.04em;
+    margin-right: auto;
+    white-space: nowrap;
+  }
+  .brand small { color: var(--muted); font-size: 11px; margin-left: 6px; letter-spacing: 0.08em; }
+  .stat { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .tonic {
+    font-family: var(--font-display); font-size: 20px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 2px 10px 2px 8px;
+  }
+  .tonic svg { width: 14px; height: 18px; }
+  .mini { color: var(--muted); font-size: 12px; }
+  .mini b { color: var(--fg); font-family: var(--font-display); font-weight: 400; font-size: 14px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    background: transparent; border: 0; padding: 4px 9px; cursor: pointer;
+    font-family: var(--font-display); font-size: 13px; color: var(--muted);
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--fg); }
+  .btn {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 12px; cursor: pointer; white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--muted); }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn.primary { background: var(--ruby); border-color: var(--ruby); color: var(--ruby-fg); }
+  .btn.armed { background: var(--ruby); border-color: var(--ruby); color: var(--ruby-fg); }
+  .price { font-family: var(--font-display); }
+
+  #stage { position: relative; min-height: 0; overflow: hidden; }
+  #game { display: block; touch-action: none; cursor: crosshair; }
+
+  footer {
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    padding-block: 8px 10px;
+    padding-left: var(--gutter-l); padding-right: var(--gutter-r);
+    display: grid; gap: 8px;
+  }
+  #info { min-height: 2.6em; line-height: 1.45; font-size: 13px; color: var(--muted); max-width: 72ch; }
+  #info b { color: var(--fg); }
+  .toolrow { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
+  #tools { display: flex; gap: 6px; overflow-x: auto; min-width: 0; flex: 1; padding-bottom: 2px; }
+  .tool {
+    position: relative; flex: none;
+    display: grid; justify-items: center; align-content: center; gap: 3px;
+    width: 76px; min-height: 64px; padding: 6px 4px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+  }
+  .tool[aria-pressed="true"] { border-color: var(--brass); box-shadow: inset 0 0 0 1px var(--brass); }
+  .tool:disabled { opacity: 0.35; cursor: default; }
+  .tool .glyph { font-size: 20px; line-height: 36px; height: 36px; }
+  .tool-label { font-size: 11px; line-height: 1.2; text-align: center; }
+  .tool .count {
+    position: absolute; top: 3px; right: 4px;
+    font-family: var(--font-display); font-size: 12px; color: var(--brass);
+  }
+  .sep { flex: none; width: 1px; background: var(--line); margin: 4px 2px; }
+  #rotate {
+    flex: none; width: 56px;
+    font-family: var(--font-display); font-size: 24px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+  }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 20;
+    background: rgba(10, 12, 14, 0.6);
+    display: grid; place-items: center;
+    padding-left: var(--gutter-l); padding-right: var(--gutter-r); padding-block: 24px;
+  }
+  .sheet {
+    width: min(560px, 100%); max-height: 100%; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px;
+    display: grid; gap: 14px;
+  }
+  .sheet-head { display: flex; align-items: center; gap: 12px; }
+  .sheet-head h2 { font-family: var(--font-display); font-weight: 400; font-size: 18px; margin: 0; margin-right: auto; text-wrap: balance; }
+  .note { color: var(--muted); font-size: 12px; margin: 0; }
+  #shop-list { display: grid; gap: 8px; }
+  .shop-row {
+    display: grid; grid-template-columns: 36px 1fr auto; gap: 12px; align-items: center;
+    padding: 10px; background: var(--panel-2); border-radius: 8px;
+  }
+  .shop-text { min-width: 0; }
+  .shop-name { font-weight: 700; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .owned { font-weight: 400; font-size: 12px; color: var(--brass); font-family: var(--font-display); }
+  .shop-desc { font-size: 12px; color: var(--muted); line-height: 1.45; }
+  .shop-btns { display: grid; gap: 6px; }
+  .menu-list { display: grid; gap: 8px; }
+  .menu-list .btn { text-align: left; padding: 10px 12px; }
+  .help { margin: 0; padding-left: 1.2em; color: var(--muted); line-height: 1.6; font-size: 13px; }
+  .help b { color: var(--fg); }
+
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    top: calc(env(safe-area-inset-top, 0px) + 64px); z-index: 30;
+    background: var(--fg); color: var(--bg);
+    padding: 8px 14px; border-radius: 6px; font-size: 13px;
+    max-width: calc(100% - 32px);
+  }
+
+  @media (max-width: 560px) {
+    .brand small { display: none; }
+    .mini { display: none; }
+    .tool { width: 66px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto !important; }
+  }
+</style>
+
+<header>
+  <div class="brand">ガラクタ姫の異食レストラン<small>試作 0.1</small></div>
+  <div class="stat tonic" title="ローズ・トニック">
+    <svg viewBox="0 0 14 18" aria-hidden="true"><path d="M7 0C10 5 13 8 13 11.5A6 6 0 0 1 1 11.5C1 8 4 5 7 0Z" fill="#c3123f"/><circle cx="4.6" cy="11.6" r="1.4" fill="#ffffff" opacity=".5"/></svg>
+    <span id="tonic">0</span>
+  </div>
+  <div class="stat mini">完食 <b id="served">0</b>　空腹で帰った <b id="hungry">0</b></div>
+  <div class="seg" role="group" aria-label="速度">
+    <button type="button" data-speed="0" aria-pressed="false">‖</button>
+    <button type="button" data-speed="1" aria-pressed="true">×1</button>
+    <button type="button" data-speed="2" aria-pressed="false">×2</button>
+    <button type="button" data-speed="4" aria-pressed="false">×4</button>
+  </div>
+  <button type="button" class="btn" id="open-shop">ショップ</button>
+  <button type="button" class="btn" id="open-menu">メニュー</button>
+</header>
+
+<main id="stage"><canvas id="game" aria-label="レストランの盤面"></canvas></main>
+
+<footer>
+  <div id="info" aria-live="polite"></div>
+  <div class="toolrow">
+    <div id="tools"></div>
+    <button type="button" id="rotate" title="向きを回す（R キー / 右クリック / ホイール）">→</button>
+  </div>
+</footer>
+
+<div class="overlay" id="shop" hidden>
+  <div class="sheet" role="dialog" aria-labelledby="shop-title">
+    <div class="sheet-head">
+      <h2 id="shop-title">ガラクタ姫のショップ</h2>
+      <div class="stat tonic">
+        <svg viewBox="0 0 14 18" aria-hidden="true"><path d="M7 0C10 5 13 8 13 11.5A6 6 0 0 1 1 11.5C1 8 4 5 7 0Z" fill="#c3123f"/></svg>
+        <span id="shop-tonic">0</span>
+      </div>
+      <button type="button" class="btn" id="shop-close">閉じる</button>
+    </div>
+    <p class="note">売れるのは配置していない（インベントリにある）設備だけ。売値は買値の半分。</p>
+    <div id="shop-list"></div>
+  </div>
+</div>
+
+<div class="overlay" id="menu" hidden>
+  <div class="sheet" role="dialog" aria-labelledby="menu-title">
+    <div class="sheet-head">
+      <h2 id="menu-title">メニュー</h2>
+      <button type="button" class="btn" id="menu-close">閉じる</button>
+    </div>
+    <ul class="help">
+      <li>下の棚から設備を選び、空きマスを<b>タップ</b>で配置。<b>ドラッグ</b>するとその方向に向けて連続配置。</li>
+      <li>置いてある設備を同じ設備でタップすると<b>回転</b>。違う設備なら入れ替え。</li>
+      <li>向きは右下の矢印ボタン、<b>R</b> キー、右クリック、ホイールで回せる。</li>
+      <li><b>ガラクタ姫</b>（盤面の左）をタップするとショップ。</li>
+      <li>レジャーシートに料理が乗ると、看板の前のロボットが食べに来てローズ・トニックを払う。</li>
+      <li>キー: <b>1〜8</b> 道具の選択、<b>Esc</b> 見るモード、<b>Space</b> 一時停止。</li>
+    </ul>
+    <div class="menu-list">
+      <button type="button" class="btn" id="reset-objects">画面上のオブジェクトをすべてリセット</button>
+      <button type="button" class="btn" id="new-game">最初からやり直す</button>
+    </div>
+    <p class="note">進行はこのブラウザに自動保存される。</p>
+  </div>
+</div>
+
+<div id="toast" role="status" hidden></div>
+
+<script src="src/defs.js"></script>
+<script src="src/sim.js"></script>
+<script src="src/render.js"></script>
+<script src="src/main.js"></script>
