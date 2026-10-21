@@ -225,7 +225,8 @@
           }
           break;
         }
-        case 'sign': {
+        case 'interior': {
+          if (def.effect !== 'attract') break;
           g.fillStyle = COL.rust; g.fillRect(cx - cs * 0.04, py + cs * 0.45, cs * 0.08, cs * 0.5);
           g.fillStyle = COL.ink; this.rr(g, px + cs * 0.02, py + cs * 0.12, cs * 0.96, cs * 0.44, cs * 0.06); g.fill();
           g.fillStyle = COL.paper; this.rr(g, px + cs * 0.06, py + cs * 0.15, cs * 0.88, cs * 0.38, cs * 0.04); g.fill();

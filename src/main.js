@@ -52,7 +52,7 @@
     }
     if (t.kind === 'recall') return '<b>回収</b>：タップした設備をインベントリに戻す。上に乗っていたものはその場に残る。';
     if (t.kind === 'reset') return '<b>リセット</b>：タップしたマスのオブジェクトを消す。詰まったときに。';
-    return 'マスをタップすると中身を確認できる。<b>ガラクタ姫</b>をタップするとショップが開く。';
+    return '<b>見る・回す</b>：マスをタップすると中身を確認し、向きのある設備なら回転する。<b>ガラクタ姫</b>をタップするとショップが開く。';
   }
 
   function describeCell(x, y) {
@@ -60,8 +60,9 @@
     const parts = [];
     if (c.equip) {
       const def = GA.EQUIPMENT[c.equip.type];
-      const dir = def.kind === 'sign' || def.kind === 'storage' || def.kind === 'disposal' ? '' : `（向き ${DIRS[c.equip.dir].arrow}）`;
-      parts.push(`<b>${def.name}</b>${dir}：${def.desc}`);
+      const dir = def.directional ? `（向き ${DIRS[c.equip.dir].arrow}）` : '';
+      const limit = def.maxPlaced ? `（設置 ${world.countPlaced(c.equip.type)}/${def.maxPlaced}）` : '';
+      parts.push(`<b>${def.name}</b>${dir}${limit}：${def.desc}`);
     }
     if (c.obj) {
       const od = GA.OBJECTS[c.obj.type];
@@ -134,7 +135,7 @@
       });
       bar.appendChild(b);
     };
-    mk('見る', 'inspect');
+    mk('見る・回す', 'inspect');
     mk('回収', 'recall');
     mk('リセット', 'reset');
     const sep = document.createElement('span'); sep.className = 'sep'; bar.appendChild(sep);
@@ -168,14 +169,17 @@
       drawIcon(cv, type);
       const text = document.createElement('div');
       text.className = 'shop-text';
-      text.innerHTML = `<div class="shop-name">${def.name}<span class="owned">在庫 ${world.inv[type] || 0}</span></div><div class="shop-desc">${def.desc}</div>`;
+      const limit = def.maxPlaced ? `<span class="owned">設置上限 ${def.maxPlaced}</span>` : '';
+      text.innerHTML = `<div class="shop-name">${def.name}<span class="owned">在庫 ${world.inv[type] || 0}</span>${limit}</div><div class="shop-desc">${def.desc}</div>`;
       const btns = document.createElement('div');
       btns.className = 'shop-btns';
       const buy = document.createElement('button');
       buy.type = 'button';
       buy.className = 'btn primary';
       buy.innerHTML = `買う <span class="price">${def.price}</span>`;
-      buy.disabled = world.tonic < def.price;
+      const atLimit = world.atOwnLimit(type);
+      buy.disabled = world.tonic < def.price || atLimit;
+      if (atLimit) buy.innerHTML = '上限';
       buy.addEventListener('click', () => { if (world.buy(type)) { invChanged(); buildShop(); } });
       const sell = document.createElement('button');
       sell.type = 'button';
@@ -213,6 +217,7 @@
       world.removeObjAt(x, y);
       res = { ok: true };
     } else {
+      if (first) world.rotateAt(x, y);
       setInfo(describeCell(x, y));
       return false;
     }
@@ -296,7 +301,7 @@
       else if (!$('menu').hidden) $('menu').hidden = true;
       else { ui.tool = { kind: 'inspect' }; buildToolbar(); setInfo(toolHint()); }
     } else if (e.key === ' ') { e.preventDefault(); setSpeed(ui.speed === 0 ? 1 : 0); }
-    else if (/^[1-8]$/.test(e.key)) {
+    else if (/^[1-9]$/.test(e.key)) {
       const btn = $('tools').querySelectorAll('.tool')[Number(e.key) - 1];
       if (btn && !btn.disabled) btn.click();
     }
@@ -383,7 +388,7 @@
     fit();
     buildToolbar();
     refreshHud();
-    setInfo(data ? toolHint() : '左にいる<b>ガラクタ姫</b>から設備一式を預かった。下の設備を選んで、ゴミコンテナ → 練り機 → レジャーシートとつなげてみよう。');
+    setInfo(data ? toolHint() : '左にいる<b>ガラクタ姫</b>から設備一式を預かった。下の設備を選んで、ゴミコンテナ → 練り機 → レジャーシートとつなげてみよう。ロボットたちは中央の客寄せ看板に集まってくる。');
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { renderer.buildBackground(); buildToolbar(); });
     requestAnimationFrame(t => { last = t; frame(t); });
   }

@@ -26,18 +26,19 @@ GA.PROCESSES = {
   neri: { name: '練り', recipes: { gomi: 'gomidango' } },
 };
 
-// 設備。kind は generator / conveyor / processor / storage / disposal / sign
+// 設備。kind は generator / conveyor / processor / storage / disposal / interior
+// directional: 向きに意味がある設備。maxPlaced: 盤面に置ける上限
 GA.EQUIPMENT = {
   gomi_container: {
-    name: 'ゴミコンテナ', kind: 'generator', produces: 'gomi', interval: 2.0, price: 15,
+    name: 'ゴミコンテナ', kind: 'generator', directional: true, produces: 'gomi', interval: 2.0, price: 15,
     desc: '向いている方向の隣マスが空いていれば「ゴミ」を生成する。',
   },
   bucket_conveyor: {
-    name: 'バケツコンベア', kind: 'conveyor', moveTime: 1.2, price: 2,
+    name: 'バケツコンベア', kind: 'conveyor', directional: true, moveTime: 1.2, price: 2,
     desc: '乗ったオブジェクトを向いている方向へ運ぶ。遅い。分配・合流・仕分け機能なし。',
   },
   neriki: {
-    name: '練り機', kind: 'processor', process: 'neri', workTime: 2.0, outTime: 0.6, price: 10,
+    name: '練り機', kind: 'processor', directional: true, process: 'neri', workTime: 2.0, outTime: 0.6, price: 10,
     desc: '中に入ったものを「練り」、向いている方向へ出す。練れないものはゴミになる。',
   },
   leisure_sheet: {
@@ -48,14 +49,17 @@ GA.EQUIPMENT = {
     name: 'シュレッダー', kind: 'disposal', workTime: 1.0, price: 8,
     desc: '乗ったオブジェクトを少し時間をかけて消滅させる。',
   },
-  sign: {
-    name: '「レストランOPEN」の看板', kind: 'sign', fixed: true, notForSale: true,
-    desc: 'ガラクタ姫が拾ってきた看板。ロボットたちはまずここに集まる。',
+  kyakuyose_kanban: {
+    name: '客寄せ看板', kind: 'interior', effect: 'attract', maxPlaced: 5, price: 20,
+    desc: 'ロボットたちがこの看板の周りに集まり、看板のある側から来るようになる。看板の数だけ客が増える。',
   },
 };
 
+// 旧バージョンの保存データにある設備名の読み替え
+GA.LEGACY_TYPES = { sign: 'kyakuyose_kanban' };
+
 // ショップに並ぶ順番
-GA.SHOP_ORDER = ['gomi_container', 'bucket_conveyor', 'neriki', 'leisure_sheet', 'shredder'];
+GA.SHOP_ORDER = ['gomi_container', 'bucket_conveyor', 'neriki', 'leisure_sheet', 'shredder', 'kyakuyose_kanban'];
 
 GA.CONFIG = {
   gridW: 11,
@@ -66,9 +70,9 @@ GA.CONFIG = {
   sellRate: 0.5,        // 売却価格 = 購入価格 × sellRate（切り捨て）
   simStep: 1 / 30,
   customer: {
-    spawnInterval: [4, 8],   // 来店の間隔（秒、範囲内でランダム）
+    spawnInterval: [4, 8],   // 来店の間隔（秒、範囲内でランダム）。客寄せ看板の数で割る
     groupSize: [1, 2],       // 一度に来る数
-    maxActive: 8,            // 同時に画面にいる上限
+    maxActive: 8,            // 同時に画面にいる上限。客寄せ看板の数を掛ける
     walkSpeed: 1.6,          // マス/秒
     patience: 7,             // 料理が無いときに看板の前で待つ秒数
     eatTime: 2.0,

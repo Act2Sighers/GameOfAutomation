@@ -28,11 +28,11 @@
       this.time = 0;
       this.spawnTimer = 1.5;
       this.stats = { served: 0, hungry: 0, earned: 0 };
-      const s = this.signPos();
-      this.cell(s.x, s.y).equip = this.makeEquip('sign', 2);
+      const s = this.centerPos();
+      this.cell(s.x, s.y).equip = this.makeEquip('kyakuyose_kanban', 2);
     }
 
-    signPos() { return { x: Math.floor(this.w / 2), y: Math.floor(this.h / 2) }; }
+    centerPos() { return { x: Math.floor(this.w / 2), y: Math.floor(this.h / 2) }; }
     inBounds(x, y) { return x >= 0 && y >= 0 && x < this.w && y < this.h; }
     cell(x, y) { return this.inBounds(x, y) ? this.cells[y * this.w + x] : null; }
     forEachCell(fn) {
@@ -40,6 +40,27 @@
     }
 
     makeEquip(type, dir) { return { type, dir, timer: 0 }; }
+
+    // オブジェクトを載せられない設備（生成所・インテリア）
+    holdsNoObjects(type) {
+      const kind = GA.EQUIPMENT[type].kind;
+      return kind === 'generator' || kind === 'interior';
+    }
+
+    countPlaced(type) {
+      let n = 0;
+      this.forEachCell(c => { if (c.equip && c.equip.type === type) n++; });
+      return n;
+    }
+
+    // 指定した効果を持つインテリアの位置
+    interiorsWith(effect) {
+      const res = [];
+      this.forEachCell((c, x, y) => {
+        if (c.equip && GA.EQUIPMENT[c.equip.type].effect === effect) res.push({ x, y });
+      });
+      return res;
+    }
     makeObj(type, x, y) {
       return { id: this.nextId++, type, x, y, fx: x, fy: y, t: 1, dur: 0, work: 0, done: false, claimedBy: 0 };
     }
@@ -50,8 +71,7 @@
       const c = this.cell(x, y);
       if (!c || c.obj) return false;
       if (!c.equip) return true; // 何も無い地面にはそのまま置かれる
-      const kind = GA.EQUIPMENT[c.equip.type].kind;
-      return kind !== 'generator' && kind !== 'sign';
+      return !this.holdsNoObjects(c.equip.type);
     }
 
     moveObj(obj, tx, ty, dur) {
@@ -77,20 +97,19 @@
     place(type, x, y, dir) {
       const c = this.cell(x, y);
       if (!c) return { ok: false };
-      if ((this.inv[type] || 0) <= 0) return { ok: false, msg: `${GA.EQUIPMENT[type].name}の在庫がありません` };
-      const kind = GA.EQUIPMENT[type].kind;
-      if (c.equip) {
-        const cur = GA.EQUIPMENT[c.equip.type];
-        if (cur.fixed) return { ok: false, msg: `${cur.name}は動かせません` };
-        if (c.equip.type === type) {
-          c.equip.dir = dir === c.equip.dir ? (dir + 1) % 4 : dir;
-          return { ok: true, rotated: true };
-        }
-        if ((kind === 'generator') && c.obj) return { ok: false, msg: 'オブジェクトがあるマスには置けません' };
-        this.recall(x, y);
-      } else if (kind === 'generator' && c.obj) {
-        return { ok: false, msg: 'オブジェクトがあるマスには置けません' };
+      const def = GA.EQUIPMENT[type];
+      if (c.equip && c.equip.type === type) {
+        // 同じ設備でタップしたら回転（在庫が無くてもよい）
+        if (!def.directional) return { ok: false };
+        c.equip.dir = dir === c.equip.dir ? (dir + 1) % 4 : dir;
+        return { ok: true, rotated: true };
       }
+      if ((this.inv[type] || 0) <= 0) return { ok: false, msg: `${def.name}の在庫がありません` };
+      if (def.maxPlaced && this.countPlaced(type) >= def.maxPlaced) {
+        return { ok: false, msg: `${def.name}は${def.maxPlaced}つまでしか置けません` };
+      }
+      if (this.holdsNoObjects(type) && c.obj) return { ok: false, msg: 'オブジェクトがあるマスには置けません' };
+      if (c.equip) this.recall(x, y);
       c.equip = this.makeEquip(type, dir);
       this.inv[type]--;
       if (c.obj) { c.obj.work = 0; c.obj.done = false; }
@@ -99,14 +118,20 @@
 
     setDir(x, y, dir) {
       const c = this.cell(x, y);
-      if (c && c.equip && !GA.EQUIPMENT[c.equip.type].fixed) c.equip.dir = dir;
+      if (c && c.equip && GA.EQUIPMENT[c.equip.type].directional) c.equip.dir = dir;
+    }
+
+    rotateAt(x, y) {
+      const c = this.cell(x, y);
+      if (!c || !c.equip || !GA.EQUIPMENT[c.equip.type].directional) return false;
+      c.equip.dir = (c.equip.dir + 1) % 4;
+      return true;
     }
 
     recall(x, y) {
       const c = this.cell(x, y);
       if (!c || !c.equip) return { ok: false };
       const def = GA.EQUIPMENT[c.equip.type];
-      if (def.fixed) return { ok: false, msg: `${def.name}は動かせません` };
       this.inv[c.equip.type] = (this.inv[c.equip.type] || 0) + 1;
       c.equip = null;
       if (c.obj) { c.obj.work = 0; c.obj.done = false; } // 中身は地面に残る
@@ -128,10 +153,16 @@
 
     sellPrice(type) { return Math.floor(GA.EQUIPMENT[type].price * C.sellRate); }
 
+    // 設置上限のある設備は、所持数（設置済み＋在庫）が上限に達したら買えない
+    atOwnLimit(type) {
+      const def = GA.EQUIPMENT[type];
+      return !!def.maxPlaced && this.countPlaced(type) + (this.inv[type] || 0) >= def.maxPlaced;
+    }
+
     buy(type) {
       const def = GA.EQUIPMENT[type];
       if (!def || def.notForSale) return false;
-      if (this.tonic < def.price) return false;
+      if (this.tonic < def.price || this.atOwnLimit(type)) return false;
       this.tonic -= def.price;
       this.inv[type] = (this.inv[type] || 0) + 1;
       return true;
@@ -209,34 +240,84 @@
 
     // ---- 客ロボット ----
 
-    findDish() {
-      let found = null;
+    availableDishes() {
+      const res = [];
       this.forEachCell((c, x, y) => {
-        if (found || !c.equip || !c.obj) return;
+        if (!c.equip || !c.obj) return;
         if (!GA.EQUIPMENT[c.equip.type].table) return;
         const o = c.obj;
         if (o.t < 1 || o.claimedBy) return;
         if (GA.OBJECTS[o.type].category !== 'dish') return;
-        found = { x, y, obj: o };
+        res.push({ x, y, obj: o });
       });
-      return found;
+      return res;
     }
 
-    spawnCustomer() {
+    // 待っている客を、立ち止まった位置から近いシートへ割り当てる。
+    // 取り合いになったら、そのシートにより近い客が勝つ（距離の短い組から順に確定）
+    assignDishes() {
+      const waiting = this.customers.filter(cu => cu.state === 'browse');
+      if (!waiting.length) return;
+      const dishes = this.availableDishes();
+      if (!dishes.length) return;
+      const pairs = [];
+      for (const cu of waiting) for (const d of dishes) {
+        pairs.push({ cu, d, dist: Math.hypot(d.x + 0.5 - cu.x, d.y + 0.5 - cu.y) });
+      }
+      pairs.sort((a, b) => a.dist - b.dist);
+      for (const { cu, d } of pairs) {
+        if (cu.state !== 'browse' || d.obj.claimedBy) continue;
+        d.obj.claimedBy = cu.id;
+        cu.target = { x: d.x, y: d.y, objId: d.obj.id };
+        cu.tx = d.x + 0.5; cu.ty = d.y + 0.85;
+        cu.state = 'toTable';
+      }
+    }
+
+    // 外周上の出現位置。客寄せ看板があればその看板に近い辺・近い場所から出やすい
+    spawnPoint(sign) {
       const B = C.border;
-      const side = randInt(0, 3);
-      let x, y;
-      if (side === 0) { x = rand(-B, this.w + B); y = -B; }
-      else if (side === 1) { x = this.w + B; y = rand(-B, this.h + B); }
-      else if (side === 2) { x = rand(-B, this.w + B); y = this.h + B; }
-      else { x = -B; y = rand(-B, this.h + B); }
-      const s = this.signPos();
-      const ang = rand(0, Math.PI * 2);
-      const r = rand(0.9, 1.6);
+      const clampX = v => Math.max(-B, Math.min(this.w + B, v));
+      const clampY = v => Math.max(-B, Math.min(this.h + B, v));
+      let side;
+      if (sign) {
+        const sx = sign.x + 0.5, sy = sign.y + 0.5;
+        const dist = [sy + B, this.w + B - sx, this.h + B - sy, sx + B]; // 上・右・下・左の辺までの距離
+        const weights = dist.map(d => 1 / (d * d));
+        let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+        side = 0;
+        while (side < 3 && r > weights[side]) { r -= weights[side]; side++; }
+        const along = (side === 0 || side === 2) ? clampX(sx + rand(-3, 3)) : clampY(sy + rand(-3, 3));
+        if (side === 0) return { x: along, y: -B };
+        if (side === 1) return { x: this.w + B, y: along };
+        if (side === 2) return { x: along, y: this.h + B };
+        return { x: -B, y: along };
+      }
+      side = randInt(0, 3);
+      if (side === 0) return { x: rand(-B, this.w + B), y: -B };
+      if (side === 1) return { x: this.w + B, y: rand(-B, this.h + B) };
+      if (side === 2) return { x: rand(-B, this.w + B), y: this.h + B };
+      return { x: -B, y: rand(-B, this.h + B) };
+    }
+
+    spawnCustomer(signs) {
+      const sign = signs.length ? signs[randInt(0, signs.length - 1)] : null;
+      const p = this.spawnPoint(sign);
+      let tx, ty;
+      if (sign) {
+        // 看板の周りに集まる
+        const ang = rand(0, Math.PI * 2);
+        const r = rand(0.9, 1.6);
+        tx = sign.x + 0.5 + Math.cos(ang) * r;
+        ty = sign.y + 0.5 + Math.sin(ang) * r;
+      } else {
+        // 看板が無いと集まらず、盤面のどこかで立ち止まる
+        tx = rand(0.3, this.w - 0.3);
+        ty = rand(0.3, this.h - 0.3);
+      }
       this.customers.push({
-        id: this.nextId++, x, y,
-        tx: s.x + 0.5 + Math.cos(ang) * r, ty: s.y + 0.5 + Math.sin(ang) * r,
-        homeX: x, homeY: y,
+        id: this.nextId++, x: p.x, y: p.y, tx, ty,
+        homeX: p.x, homeY: p.y,
         state: 'enter', wait: 0, target: null,
         hue: randInt(0, 359), bob: rand(0, 6),
       });
@@ -268,10 +349,14 @@
       const CC = C.customer;
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
-        this.spawnTimer = rand(CC.spawnInterval[0], CC.spawnInterval[1]);
+        // 客寄せ看板の数だけ来店ペースと同時上限が倍になる（0枚でも1枚分は来る）
+        const signs = this.interiorsWith('attract');
+        const mult = Math.max(1, signs.length);
+        this.spawnTimer = rand(CC.spawnInterval[0], CC.spawnInterval[1]) / mult;
         const n = randInt(CC.groupSize[0], CC.groupSize[1]);
-        for (let i = 0; i < n && this.customers.length < CC.maxActive; i++) this.spawnCustomer();
+        for (let i = 0; i < n && this.customers.length < CC.maxActive * mult; i++) this.spawnCustomer(signs);
       }
+      this.assignDishes();
 
       for (const cu of this.customers) {
         cu.bob += dt;
@@ -280,14 +365,6 @@
             if (this.walk(cu, dt)) { cu.state = 'browse'; cu.wait = 0; }
             break;
           case 'browse': {
-            const dish = this.findDish();
-            if (dish) {
-              dish.obj.claimedBy = cu.id;
-              cu.target = { x: dish.x, y: dish.y, objId: dish.obj.id };
-              cu.tx = dish.x + 0.5; cu.ty = dish.y + 0.85;
-              cu.state = 'toTable';
-              break;
-            }
             cu.wait += dt;
             if (cu.wait >= CC.patience) this.leave(cu, true);
             break;
@@ -343,7 +420,8 @@
       this.inv = { ...data.inv };
       this.stats = { ...this.stats, ...data.stats };
       for (const e of data.cells) {
-        if (GA.EQUIPMENT[e.type] && this.inBounds(e.x, e.y)) this.cell(e.x, e.y).equip = this.makeEquip(e.type, e.dir);
+        const type = GA.LEGACY_TYPES[e.type] || e.type;
+        if (GA.EQUIPMENT[type] && this.inBounds(e.x, e.y)) this.cell(e.x, e.y).equip = this.makeEquip(type, e.dir);
       }
       for (const o of data.objects) {
         if (GA.OBJECTS[o.type] && this.inBounds(o.x, o.y)) {
@@ -352,8 +430,6 @@
           this.cell(o.x, o.y).obj = obj;
         }
       }
-      const s = this.signPos();
-      if (!this.cell(s.x, s.y).equip) this.cell(s.x, s.y).equip = this.makeEquip('sign', 2);
       return true;
     }
   }
