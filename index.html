@@ -90,7 +90,8 @@
     padding-left: var(--gutter-l); padding-right: var(--gutter-r);
     display: grid; gap: 8px;
   }
-  #info { min-height: 2.6em; line-height: 1.45; font-size: 13px; color: var(--muted); max-width: 72ch; }
+  /* 説明の長さで盤面の大きさが変わらないよう、高さは3行分で固定（あふれたらこの中でスクロール） */
+  #info { height: calc(1.45em * 3); overflow-y: auto; line-height: 1.45; font-size: 13px; color: var(--muted); max-width: 80ch; }
   #info b { color: var(--fg); }
   .toolrow { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
   #tools { display: flex; gap: 6px; overflow-x: auto; min-width: 0; flex: 1; padding-bottom: 2px; }
@@ -165,7 +166,7 @@
 </style>
 
 <header>
-  <div class="brand">ガラクタ姫の異食レストラン<small>試作 0.3</small></div>
+  <div class="brand">ガラクタ姫の異食レストラン<small>試作 0.4</small></div>
   <div class="stat tonic" title="ローズ・トニック">
     <svg viewBox="0 0 14 18" aria-hidden="true"><path d="M7 0C10 5 13 8 13 11.5A6 6 0 0 1 1 11.5C1 8 4 5 7 0Z" fill="#c3123f"/><circle cx="4.6" cy="11.6" r="1.4" fill="#ffffff" opacity=".5"/></svg>
     <span id="tonic">0</span>
@@ -214,7 +215,10 @@
     </div>
     <ul class="help">
       <li>下の棚から設備を選び、空きマスを<b>タップ</b>で配置。<b>ドラッグ</b>するとその方向に向けて連続配置。</li>
-      <li><b>見る・回す</b>モードで設備をタップすると<b>回転</b>。同じ設備を選んでタップしても回転、違う設備なら入れ替え。</li>
+      <li><b>見る・回す・運ぶ</b>モードで設備をタップすると<b>回転</b>。同じ設備を選んでタップしても回転、違う設備なら入れ替え。</li>
+      <li><b>見る・回す・運ぶ</b>モードでオブジェクトを<b>ドラッグ</b>すると、空いているマスへ運べる。置けないマスで離すと元の場所に戻る。</li>
+      <li><b>バスケット</b>の上のものには、ロボットは手を出さない。仕分けコンベアの比較マスに便利。</li>
+      <li><b>工事中看板</b>を置いている間は客が来ない。配置に集中したいときに。</li>
       <li>向きは右下の矢印ボタン、<b>R</b> キー、右クリック、ホイールで回せる。仕分けコンベアは向き4つ×左右反転の<b>8段階</b>で一周する。</li>
       <li><b>タイヤコンベア</b>は、隣のタイヤコンベアが自分から離れる向きに置かれていると、そちらにも分配する。複数の方向から流れ込むと順番に合流する。</li>
       <li><b>仕分けコンベア</b>は、点線で示した比較マスにあるオブジェクトと同じものを黄色い矢印の方へ、それ以外を白い矢印の方へ流す。</li>

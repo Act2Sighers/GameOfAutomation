@@ -27,7 +27,8 @@ GA.PROCESSES = {
 };
 
 // 設備。kind は generator / conveyor / processor / storage / disposal / interior
-// directional: 向きに意味がある設備。maxPlaced: 盤面に置ける上限
+// directional: 向きに意味がある設備。maxPlaced: 盤面に置ける上限。maxOwned: 所持できる上限（設置済み＋在庫）
+// protected: この上のオブジェクトにはロボットが手を出さない
 // conveyor の mode: simple = 一方向に流すだけ / junction = 分配・合流 / sorter = 仕分け
 // conveyor の family: 系統（バケツ系・タイヤ系）。今は見た目と説明だけに使う
 GA.EQUIPMENT = {
@@ -56,6 +57,10 @@ GA.EQUIPMENT = {
     name: 'レジャーシート', kind: 'storage', table: true, price: 6,
     desc: '食事テーブル。料理が乗るとロボットが食べに来る。',
   },
+  basket: {
+    name: 'バスケット', kind: 'storage', protected: true, price: 4,
+    desc: '木編みの籠。上に乗ったものには何もしない。ロボットたちはこの上のものに手を出さない。',
+  },
   shredder: {
     name: 'シュレッダー', kind: 'disposal', workTime: 1.0, price: 8,
     desc: '乗ったオブジェクトを少し時間をかけて消滅させる。',
@@ -64,13 +69,17 @@ GA.EQUIPMENT = {
     name: '客寄せ看板', kind: 'interior', effect: 'attract', maxPlaced: 5, price: 20,
     desc: 'ロボットたちがこの看板の周りに集まり、看板のある側から来るようになる。看板の数だけ客が増える。',
   },
+  koujichuu_kanban: {
+    name: '工事中看板', kind: 'interior', effect: 'closed', maxOwned: 1, price: 1,
+    desc: '置いてある間、ロボットたちは店に来なくなり、いた客もすぐに帰る。客寄せ看板より優先される。',
+  },
 };
 
 // 旧バージョンの保存データにある設備名の読み替え
 GA.LEGACY_TYPES = { sign: 'kyakuyose_kanban' };
 
 // ショップに並ぶ順番
-GA.SHOP_ORDER = ['gomi_container', 'bucket_conveyor', 'tire_conveyor', 'tire_sorter', 'neriki', 'leisure_sheet', 'shredder', 'kyakuyose_kanban'];
+GA.SHOP_ORDER = ['gomi_container', 'bucket_conveyor', 'tire_conveyor', 'tire_sorter', 'neriki', 'leisure_sheet', 'basket', 'shredder', 'kyakuyose_kanban', 'koujichuu_kanban'];
 
 GA.CONFIG = {
   gridW: 11,
@@ -79,7 +88,7 @@ GA.CONFIG = {
   testMode: true,       // テスト用: 初期トニック testTonic、メニューにトニック補充ボタン
   testTonic: 999,
   startTonic: 0,
-  starterKit: { gomi_container: 1, bucket_conveyor: 6, neriki: 1, leisure_sheet: 1, shredder: 1 },
+  starterKit: { gomi_container: 1, bucket_conveyor: 6, neriki: 1, leisure_sheet: 1, shredder: 1, koujichuu_kanban: 1 },
   sellRate: 0.5,        // 売却価格 = 購入価格 × sellRate（切り捨て）
   simStep: 1 / 30,
   customer: {
@@ -89,5 +98,7 @@ GA.CONFIG = {
     walkSpeed: 1.6,          // マス/秒
     patience: 7,             // 料理が無いときに看板の前で待つ秒数
     eatTime: 2.0,
+    exitSpread: 2.5,         // 帰るときの出口のばらつき（マス）。辺に沿って左右にずらす幅
+    exitBias: 1.5,           // 小さいほど一番近い辺から帰りやすい
   },
 };

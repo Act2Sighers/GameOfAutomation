@@ -197,7 +197,7 @@
       if (o.route === undefined) {
         const sides = this.sorterSides(e);
         const ref = this.cell(x + DIRS[sides.ref].x, y + DIRS[sides.ref].y);
-        o.route = ref && ref.obj && ref.obj.type === o.type ? sides.out : e.dir;
+        o.route = ref && ref.obj && !ref.obj.held && ref.obj.type === o.type ? sides.out : e.dir;
       }
       this.tryPush(x, y, o.route, def.moveTime);
     }
@@ -271,10 +271,41 @@
 
     sellPrice(type) { return Math.floor(GA.EQUIPMENT[type].price * C.sellRate); }
 
-    // 設置上限のある設備は、所持数（設置済み＋在庫）が上限に達したら買えない
+    // 所持数（設置済み＋在庫）が上限に達したら買えない。上限は maxOwned、無ければ maxPlaced
     atOwnLimit(type) {
       const def = GA.EQUIPMENT[type];
-      return !!def.maxPlaced && this.countPlaced(type) + (this.inv[type] || 0) >= def.maxPlaced;
+      const limit = def.maxOwned || def.maxPlaced;
+      return !!limit && this.countPlaced(type) + (this.inv[type] || 0) >= limit;
+    }
+
+    // ---- オブジェクトを手で運ぶ ----
+
+    // つかんでいる間もオブジェクトは元のマスに残り、そのマスに他のものが入るのを防ぐ
+    grabObj(x, y) {
+      const c = this.cell(x, y);
+      if (!c || !c.obj) return null;
+      c.obj.held = true;
+      c.obj.claimedBy = 0;
+      return c.obj;
+    }
+
+    canDropAt(o, x, y) {
+      if (o.x === x && o.y === y) return true;
+      return this.canAccept(x, y);
+    }
+
+    // 置けないマスなら元のマスに戻す。戻り値は移動したかどうか
+    dropHeld(o, x, y) {
+      o.held = false;
+      const moved = (o.x !== x || o.y !== y) && this.canAccept(x, y);
+      if (moved) {
+        this.cell(o.x, o.y).obj = null;
+        o.x = x; o.y = y;
+        this.cell(x, y).obj = o;
+        o.work = 0; o.done = false; o.route = undefined;
+      }
+      o.fx = o.x; o.fy = o.y; o.t = 1; o.dur = 0;
+      return moved;
     }
 
     buy(type) {
@@ -301,7 +332,7 @@
       // オブジェクトの移動アニメーション
       this.forEachCell(c => {
         const o = c.obj;
-        if (o && o.t < 1) o.t = o.dur > 0 ? Math.min(1, o.t + dt / o.dur) : 1;
+        if (o && !o.held && o.t < 1) o.t = o.dur > 0 ? Math.min(1, o.t + dt / o.dur) : 1;
       });
 
       // 設備の処理（固定順）
@@ -309,7 +340,7 @@
         if (!c.equip) return;
         const e = c.equip;
         const def = GA.EQUIPMENT[e.type];
-        const o = c.obj;
+        const o = c.obj && !c.obj.held ? c.obj : null; // つかまれているものには何もしない
         const arrived = o && o.t >= 1;
         switch (def.kind) {
           case 'generator': {
@@ -363,11 +394,18 @@
 
     // ---- 客ロボット ----
 
+    // ロボットがこのマスのオブジェクトに手を出してよいか
+    robotsMayTouch(x, y) {
+      const c = this.cell(x, y);
+      if (!c || !c.obj || c.obj.held) return false;
+      return !(c.equip && GA.EQUIPMENT[c.equip.type].protected);
+    }
+
     availableDishes() {
       const res = [];
       this.forEachCell((c, x, y) => {
         if (!c.equip || !c.obj) return;
-        if (!GA.EQUIPMENT[c.equip.type].table) return;
+        if (!GA.EQUIPMENT[c.equip.type].table || !this.robotsMayTouch(x, y)) return;
         const o = c.obj;
         if (o.t < 1 || o.claimedBy) return;
         if (GA.OBJECTS[o.type].category !== 'dish') return;
@@ -440,7 +478,6 @@
       }
       this.customers.push({
         id: this.nextId++, x: p.x, y: p.y, tx, ty,
-        homeX: p.x, homeY: p.y,
         state: 'enter', wait: 0, target: null,
         hue: randInt(0, 359), bob: rand(0, 6),
       });
@@ -458,20 +495,43 @@
     targetStillValid(cu) {
       const t = cu.target;
       const c = this.cell(t.x, t.y);
-      return c && c.obj && c.obj.id === t.objId && c.equip && GA.EQUIPMENT[c.equip.type].table;
+      return c && c.obj && c.obj.id === t.objId && c.equip && GA.EQUIPMENT[c.equip.type].table && this.robotsMayTouch(t.x, t.y);
+    }
+
+    // 帰り道の出口。近い辺ほど選ばれやすく、辺に沿った位置もばらつかせて斜めに歩かせる
+    exitPoint(x, y) {
+      const B = C.border, CC = C.customer;
+      const dist = [y + B, this.w + B - x, this.h + B - y, x + B]; // 上・右・下・左
+      const weights = dist.map(d => Math.exp(-d / CC.exitBias));
+      let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+      let side = 0;
+      while (side < 3 && r > weights[side]) { r -= weights[side]; side++; }
+      const spread = rand(-CC.exitSpread, CC.exitSpread);
+      const ax = Math.max(-B, Math.min(this.w + B, x + spread));
+      const ay = Math.max(-B, Math.min(this.h + B, y + spread));
+      if (side === 0) return { x: ax, y: -B };
+      if (side === 1) return { x: this.w + B, y: ay };
+      if (side === 2) return { x: ax, y: this.h + B };
+      return { x: -B, y: ay };
     }
 
     leave(cu, hungry) {
       cu.state = 'leave';
-      cu.tx = cu.homeX; cu.ty = cu.homeY;
+      const p = this.exitPoint(cu.x, cu.y);
+      cu.tx = p.x; cu.ty = p.y;
       cu.hungry = hungry;
       if (hungry) this.stats.hungry++;
     }
 
     updateCustomers(dt) {
       const CC = C.customer;
+      // 工事中看板があると誰も来ず、いた客もすぐに帰る（客寄せ看板より優先）
+      const closed = this.interiorsWith('closed').length > 0;
+      if (closed) {
+        for (const cu of this.customers) if (cu.state !== 'leave') { this.leave(cu, false); cu.target = null; }
+      }
       this.spawnTimer -= dt;
-      if (this.spawnTimer <= 0) {
+      if (this.spawnTimer <= 0 && !closed) {
         // 客寄せ看板の数だけ来店ペースと同時上限が倍になる（0枚でも1枚分は来る）
         const signs = this.interiorsWith('attract');
         const mult = Math.max(1, signs.length);

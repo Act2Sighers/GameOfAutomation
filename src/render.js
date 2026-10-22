@@ -136,9 +136,31 @@
       // ガラクタ姫
       this.drawPrincess(g, w.time, ui.hoverPrincess);
 
+      // つかんでいるオブジェクトの元のマスと、落とす先
+      if (ui.grab && ui.grab.active) {
+        const o = ui.grab.obj;
+        g.strokeStyle = 'rgba(242,234,216,0.8)'; g.lineWidth = 2; g.setLineDash([4, 3]);
+        g.strokeRect(this.sx(o.x) + 3.5, this.sy(o.y) + 3.5, cs - 7, cs - 7);
+        g.setLineDash([]);
+        const t = this.toCell(ui.grab.px, ui.grab.py);
+        if (w.inBounds(t.x, t.y)) {
+          g.strokeStyle = w.canDropAt(o, t.x, t.y) ? '#9fe3a0' : COL.rubyLight;
+          g.lineWidth = 3;
+          g.strokeRect(this.sx(t.x) + 1.5, this.sy(t.y) + 1.5, cs - 3, cs - 3);
+        }
+      }
+
       // 客ロボット（y順）
       const cus = [...w.customers].sort((a, b) => a.y - b.y);
       for (const cu of cus) this.drawCustomer(g, cu);
+
+      // つかんでいるオブジェクトは指の位置に描く（ロボットより手前）
+      if (ui.grab && ui.grab.active) {
+        const o = ui.grab.obj;
+        g.fillStyle = 'rgba(0,0,0,0.3)';
+        g.beginPath(); g.ellipse(ui.grab.px, ui.grab.py + cs * 0.35, cs * 0.3, cs * 0.1, 0, 0, Math.PI * 2); g.fill();
+        this.drawObj(g, o.type, ui.grab.px, ui.grab.py - cs * 0.08, cs * 0.36, o.id);
+      }
 
       // エフェクト
       for (const fx of w.effects) {
@@ -201,6 +223,7 @@
           break;
         }
         case 'storage': {
+          if (e.type === 'basket') { this.drawBasket(g, px, py); break; }
           g.fillStyle = COL.cloth; g.fillRect(px + cs * 0.06, py + cs * 0.06, cs * 0.88, cs * 0.88);
           g.fillStyle = COL.clothAlt;
           const n = 4, s = cs * 0.88 / n;
@@ -219,6 +242,7 @@
           break;
         }
         case 'interior': {
+          if (def.effect === 'closed') { this.drawClosedSign(g, px, py); break; }
           if (def.effect !== 'attract') break;
           g.fillStyle = COL.rust; g.fillRect(cx - cs * 0.04, py + cs * 0.45, cs * 0.08, cs * 0.5);
           g.fillStyle = COL.ink; this.rr(g, px + cs * 0.02, py + cs * 0.12, cs * 0.96, cs * 0.44, cs * 0.06); g.fill();
@@ -378,6 +402,7 @@
 
     drawObjOnCell(g, c, time) {
       const o = c.obj;
+      if (o.held) return;
       const ease = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
       const k = ease(o.t);
       const x = o.fx + (o.x - o.fx) * k + 0.5;
@@ -514,6 +539,65 @@
       this.rr(g, x - tw / 2, y + s * 0.62, tw, cs * 0.32, cs * 0.08); g.fill();
       g.fillStyle = COL.paper;
       g.fillText(label, x, y + s * 0.62 + cs * 0.16);
+    }
+
+    drawBasket(g, px, py) {
+      const cs = this.cs;
+      const x = px + cs * 0.1, y = py + cs * 0.22, w = cs * 0.8, h = cs * 0.66;
+      g.fillStyle = '#5a3a1e';
+      this.rr(g, x, y + cs * 0.04, w, h, cs * 0.16); g.fill();
+      g.fillStyle = '#a8743f';
+      this.rr(g, x, y, w, h, cs * 0.16); g.fill();
+      // 編み目
+      g.save();
+      this.rr(g, x, y, w, h, cs * 0.16); g.clip();
+      g.strokeStyle = '#7d5129'; g.lineWidth = Math.max(1, cs * 0.04);
+      const step = cs * 0.13;
+      for (let i = 0; i * step < h; i++) {
+        g.beginPath(); g.moveTo(x, y + i * step + step / 2); g.lineTo(x + w, y + i * step + step / 2); g.stroke();
+      }
+      g.strokeStyle = '#c8935a';
+      for (let i = 0; i * step < w; i++) {
+        for (let j = 0; j * step < h; j++) {
+          if ((i + j) % 2) continue;
+          g.beginPath(); g.moveTo(x + i * step + step / 2, y + j * step); g.lineTo(x + i * step + step / 2, y + j * step + step); g.stroke();
+        }
+      }
+      g.restore();
+      // 縁
+      g.strokeStyle = '#6b4423'; g.lineWidth = Math.max(2, cs * 0.07);
+      this.rr(g, x, y, w, h, cs * 0.16); g.stroke();
+      g.fillStyle = 'rgba(40,24,10,0.35)';
+      this.rr(g, x + cs * 0.1, y + cs * 0.1, w - cs * 0.2, h - cs * 0.2, cs * 0.1); g.fill();
+    }
+
+    drawClosedSign(g, px, py) {
+      const cs = this.cs;
+      // 脚
+      g.strokeStyle = '#3a3a3a'; g.lineWidth = Math.max(2, cs * 0.06);
+      g.beginPath();
+      g.moveTo(px + cs * 0.22, py + cs * 0.92); g.lineTo(px + cs * 0.3, py + cs * 0.3);
+      g.moveTo(px + cs * 0.78, py + cs * 0.92); g.lineTo(px + cs * 0.7, py + cs * 0.3);
+      g.stroke();
+      // 縞の板
+      const bx = px + cs * 0.06, by = py + cs * 0.16, bw = cs * 0.88, bh = cs * 0.3;
+      g.save();
+      g.beginPath(); g.rect(bx, by, bw, bh); g.clip();
+      g.fillStyle = '#e8c22e'; g.fillRect(bx, by, bw, bh);
+      g.fillStyle = '#1f1f1f';
+      for (let i = -2; i < 8; i++) {
+        g.beginPath();
+        g.moveTo(bx + i * cs * 0.2, by + bh); g.lineTo(bx + i * cs * 0.2 + cs * 0.1, by + bh);
+        g.lineTo(bx + i * cs * 0.2 + cs * 0.1 + bh, by); g.lineTo(bx + i * cs * 0.2 + bh, by);
+        g.closePath(); g.fill();
+      }
+      g.restore();
+      // 文字の札
+      g.fillStyle = COL.paper; this.rr(g, px + cs * 0.14, py + cs * 0.5, cs * 0.72, cs * 0.26, cs * 0.04); g.fill();
+      g.fillStyle = COL.ink;
+      g.font = `700 ${Math.round(cs * 0.18)}px "DotGothic16", sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('工事中', px + cs / 2, py + cs * 0.63);
     }
 
     rr(g, x, y, w, h, r) {

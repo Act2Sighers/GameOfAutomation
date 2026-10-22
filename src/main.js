@@ -18,6 +18,7 @@
     hover: null,
     hoverPrincess: false,
     drag: null,
+    grab: null,   // 手で運んでいるオブジェクト { obj, px, py, active }
   };
 
   // ---- 保存 ----
@@ -72,7 +73,7 @@
     }
     if (t.kind === 'recall') return '<b>回収</b>：タップした設備をインベントリに戻す。上に乗っていたものはその場に残る。';
     if (t.kind === 'reset') return '<b>リセット</b>：タップしたマスのオブジェクトを消す。詰まったときに。';
-    return '<b>見る・回す</b>：マスをタップすると中身を確認し、向きのある設備なら回転する。<b>ガラクタ姫</b>をタップするとショップが開く。';
+    return '<b>見る・回す・運ぶ</b>：タップで中身を確認し、向きのある設備なら回転。オブジェクトはドラッグで別のマスへ運べる。<b>ガラクタ姫</b>をタップするとショップ。';
   }
 
   function describeCell(x, y) {
@@ -169,7 +170,7 @@
       });
       bar.appendChild(b);
     };
-    mk('見る・回す', 'inspect');
+    mk('見る・回す・運ぶ', 'inspect');
     mk('回収', 'recall');
     mk('リセット', 'reset');
     const sep = document.createElement('span'); sep.className = 'sep'; bar.appendChild(sep);
@@ -283,8 +284,14 @@
     ui.hover = cell;
     canvas.setPointerCapture(e.pointerId);
     const occupied = world.inBounds(cell.x, cell.y) && world.cell(cell.x, cell.y).equip;
-    ui.drag = { last: cell, start: cell, moved: false, placedLast: false, deferred: false };
-    if (ui.tool.kind === 'place' && occupied) {
+    ui.drag = { last: cell, start: cell, moved: false, placedLast: false, deferred: false, sx: p.x, sy: p.y };
+    if (ui.tool.kind === 'inspect') {
+      // 回転は指を離したときに。オブジェクトの上なら、少し動かした時点で「運ぶ」になる
+      ui.drag.deferred = true;
+      const c = world.cell(cell.x, cell.y);
+      if (c && c.obj) ui.grab = { obj: c.obj, px: p.x, py: p.y, active: false };
+      if (c) setInfo(describeCell(cell.x, cell.y));
+    } else if (ui.tool.kind === 'place' && occupied) {
       ui.drag.deferred = true; // タップかドラッグかは指を離すまで決めない
     } else {
       ui.drag.placedLast = applyAt(cell.x, cell.y, true);
@@ -299,6 +306,16 @@
     canvas.style.cursor = ui.hoverPrincess ? 'pointer' : 'crosshair';
     const d = ui.drag;
     if (!d) return;
+    const gr = ui.grab;
+    if (gr) {
+      gr.px = p.x; gr.py = p.y;
+      if (!gr.active && Math.hypot(p.x - d.sx, p.y - d.sy) > renderer.cs * 0.3) {
+        // 流れて隣のマスへ移っていても、そのオブジェクトをつかむ
+        if (world.grabObj(gr.obj.x, gr.obj.y) === gr.obj) { gr.active = true; d.moved = true; }
+        else ui.grab = null;
+      }
+      if (ui.grab && ui.grab.active) return;
+    }
     // 飛び越したマスも1マスずつたどる
     while (d.last.x !== cell.x || d.last.y !== cell.y) {
       const next = { x: d.last.x, y: d.last.y };
@@ -321,12 +338,25 @@
 
   function endDrag() {
     const d = ui.drag;
+    const gr = ui.grab;
+    ui.grab = null;
+    if (gr && gr.active) {
+      const t = renderer.toCell(gr.px, gr.py);
+      const moved = world.dropHeld(gr.obj, t.x, t.y);
+      setInfo(moved ? describeCell(t.x, t.y) : 'そのマスには置けないので、元の場所に戻した。');
+      ui.drag = null;
+      return;
+    }
     if (d && d.deferred && !d.moved) applyAt(d.start.x, d.start.y, true);
     if (d && ui.tool.kind === 'place') setInfo(toolHint());
     ui.drag = null;
   }
   canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', () => { ui.drag = null; });
+  canvas.addEventListener('pointercancel', () => {
+    if (ui.grab && ui.grab.active) world.dropHeld(ui.grab.obj, ui.grab.obj.x, ui.grab.obj.y);
+    ui.grab = null;
+    ui.drag = null;
+  });
   canvas.addEventListener('pointerleave', () => { if (!ui.drag) { ui.hover = null; ui.hoverPrincess = false; } });
   canvas.addEventListener('contextmenu', e => { e.preventDefault(); rotate(1); });
   canvas.addEventListener('wheel', e => {
@@ -407,6 +437,7 @@
     canvas.style.width = r.width + 'px';
     canvas.style.height = r.height + 'px';
     renderer.resize(r.width, r.height);
+    renderer.draw(ui); // キャンバスはサイズ変更で消えるので、その場で描き直して空白のフレームを出さない
   }
   new ResizeObserver(fit).observe($('stage'));
 
