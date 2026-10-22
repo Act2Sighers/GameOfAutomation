@@ -114,16 +114,8 @@
 
     // 隣接設備のうち、このマスに向けて出力しているものの方向
     feeders(x, y) {
-      const res = [];
-      if (this.iconMode) return res;
-      for (let k = 0; k < 4; k++) {
-        const c = this.world.cell(x + DIRS[k].x, y + DIRS[k].y);
-        if (!c || !c.equip) continue;
-        const kind = GA.EQUIPMENT[c.equip.type].kind;
-        if (kind !== 'generator' && kind !== 'conveyor' && kind !== 'processor') continue;
-        if (c.equip.dir === (k + 2) % 4) res.push(k);
-      }
-      return res;
+      if (this.iconMode) return [];
+      return this.world.inputsOf(x, y);
     }
 
     draw(ui) {
@@ -167,8 +159,9 @@
         const { x, y } = ui.hover;
         if (ui.tool.kind === 'place') {
           g.globalAlpha = 0.55;
-          this.drawEquip(g, { type: ui.tool.type, dir: ui.dir, timer: 0 }, x, y, w.time, null);
-          this.drawEquipTop(g, { type: ui.tool.type, dir: ui.dir }, x, y, null);
+          const ghost = { type: ui.tool.type, dir: ui.dir, mirror: ui.mirror, timer: 0 };
+          this.drawEquip(g, ghost, x, y, w.time, null);
+          this.drawEquipTop(g, ghost, x, y, null);
           g.globalAlpha = 1;
         }
         const colors = { place: COL.paper, recall: '#f0b44c', reset: COL.rubyLight, inspect: 'rgba(255,255,255,0.7)' };
@@ -188,7 +181,7 @@
       const cx = px + cs / 2, cy = py + cs / 2;
       const d = DIRS[e.dir];
       switch (def.kind) {
-        case 'conveyor': this.drawConveyor(g, e, x, y, time); break;
+        case 'conveyor': this.drawConveyor(g, e, x, y, time, !!cell); break;
         case 'generator': {
           g.fillStyle = COL.metalDark; this.rr(g, px + cs * 0.08, py + cs * 0.12, cs * 0.84, cs * 0.8, cs * 0.08); g.fill();
           g.fillStyle = '#5f7a5a'; this.rr(g, px + cs * 0.12, py + cs * 0.08, cs * 0.76, cs * 0.76, cs * 0.08); g.fill();
@@ -244,6 +237,7 @@
       const def = GA.EQUIPMENT[e.type];
       const cs = this.cs, px = this.sx(x), py = this.sy(y);
       const cx = px + cs / 2, cy = py + cs / 2;
+      if (def.mode === 'sorter' && !this.iconMode) this.drawSorterRef(g, e, x, y);
       if (def.kind === 'processor') {
         const o = cell && cell.obj;
         // 作業中は進捗リング
@@ -258,8 +252,8 @@
         g.fillText(GA.PROCESSES[def.process].name, cx, py + cs * 0.2);
         this.drawOutArrow(g, cx, cy, DIRS[e.dir], COL.paper);
       }
-      if (def.kind === 'disposal' && cell && cell.obj && cell.obj.t >= 1) {
-        const k = cell.obj.work / def.workTime;
+      if (def.kind === 'disposal' && cell && cell.obj) {
+        const k = Math.min(1, cell.obj.work / def.workTime);
         g.fillStyle = 'rgba(195,18,63,0.6)';
         g.fillRect(px + cs * 0.18, py + cs * 0.38, cs * 0.64 * k, cs * 0.24);
       }
@@ -277,27 +271,18 @@
       g.closePath(); g.fill();
     }
 
-    drawConveyor(g, e, x, y, time) {
+    // live=false はゴーストやアイコン（盤面の接続を見ない）
+    drawConveyor(g, e, x, y, time, live) {
+      const def = GA.EQUIPMENT[e.type];
+      if (def.mode === 'junction') return this.drawTire(g, e, x, y, time, live);
+      if (def.mode === 'sorter') return this.drawSorter(g, e, x, y, time, live);
       const cs = this.cs, px = this.sx(x), py = this.sy(y);
       const cx = px + cs / 2, cy = py + cs / 2;
       const out = e.dir, back = (out + 2) % 4;
-      const feeds = this.feeders(x, y).filter(k => k !== out);
+      const feeds = (live ? this.feeders(x, y) : []).filter(k => k !== out);
       const curveFrom = (feeds.length === 1 && feeds[0] !== back) ? feeds[0] : null;
       const from = curveFrom === null ? back : curveFrom;
-      const a = { x: cx + DIRS[from].x * cs / 2, y: cy + DIRS[from].y * cs / 2 };
-      const b = { x: cx + DIRS[out].x * cs / 2, y: cy + DIRS[out].y * cs / 2 };
-
-      const path = () => { g.beginPath(); g.moveTo(a.x, a.y); g.quadraticCurveTo(cx, cy, b.x, b.y); };
-      g.lineCap = 'butt';
-      g.strokeStyle = COL.metalDark; g.lineWidth = cs * 0.62; path(); g.stroke();
-      g.strokeStyle = '#7a6a55'; g.lineWidth = cs * 0.5; path(); g.stroke();
-      // バケツ（流れ方向に動く破線）
-      const def = GA.EQUIPMENT[e.type];
-      g.strokeStyle = '#a89470'; g.lineWidth = cs * 0.4;
-      g.setLineDash([cs * 0.16, cs * 0.09]);
-      g.lineDashOffset = -((time / def.moveTime) * cs) % (cs * 0.25);
-      path(); g.stroke();
-      g.setLineDash([]); g.lineDashOffset = 0;
+      this.drawBand(g, cx, cy, from, out, time, def.moveTime, ['#3c454b', '#7a6a55', '#a89470'], [0.62, 0.5, 0.4]);
       // 横からの追加入力を短く描く
       for (const k of feeds) {
         if (k === from) continue;
@@ -305,6 +290,88 @@
         g.beginPath(); g.moveTo(cx + DIRS[k].x * cs / 2, cy + DIRS[k].y * cs / 2); g.lineTo(cx + DIRS[k].x * cs * 0.2, cy + DIRS[k].y * cs * 0.2); g.stroke();
       }
       this.drawOutArrow(g, cx, cy, DIRS[out], 'rgba(36,30,27,0.75)');
+    }
+
+    // from 側の辺から to 側の辺へ（to が null なら中心まで、from が null なら中心から）流れる帯
+    drawBand(g, cx, cy, from, to, time, moveTime, colors, widths) {
+      const cs = this.cs;
+      const pt = k => k === null ? { x: cx, y: cy } : { x: cx + DIRS[k].x * cs / 2, y: cy + DIRS[k].y * cs / 2 };
+      const a = pt(from), b = pt(to);
+      const path = () => { g.beginPath(); g.moveTo(a.x, a.y); g.quadraticCurveTo(cx, cy, b.x, b.y); };
+      g.lineCap = 'butt';
+      g.strokeStyle = colors[0]; g.lineWidth = cs * widths[0]; path(); g.stroke();
+      g.strokeStyle = colors[1]; g.lineWidth = cs * widths[1]; path(); g.stroke();
+      g.strokeStyle = colors[2]; g.lineWidth = cs * widths[2];
+      const period = cs * 0.25;
+      g.setLineDash([cs * 0.16, cs * 0.09]);
+      g.lineDashOffset = -((time / moveTime) * cs) % period;
+      path(); g.stroke();
+      g.setLineDash([]); g.lineDashOffset = 0;
+    }
+
+    drawTire(g, e, x, y, time, live) {
+      const cs = this.cs, px = this.sx(x), py = this.sy(y);
+      const cx = px + cs / 2, cy = py + cs / 2;
+      const def = GA.EQUIPMENT[e.type];
+      const TIRE = ['#1f2022', '#3a3c3f', '#5d6064'];
+      const W = [0.64, 0.52, 0.4];
+      const outs = live ? this.world.outputsOf(x, y) : [e.dir];
+      let ins = live ? this.world.inputsOf(x, y).filter(k => !outs.includes(k)) : [];
+      if (!ins.length && !outs.includes((e.dir + 2) % 4)) ins = [(e.dir + 2) % 4]; // 入口が無ければ後ろを入口として描く
+      if (ins.length === 1 && outs.length === 1) {
+        this.drawBand(g, cx, cy, ins[0], outs[0], time, def.moveTime, TIRE, W);
+      } else {
+        for (const k of ins) this.drawBand(g, cx, cy, k, null, time, def.moveTime, TIRE, W);
+        for (const k of outs) this.drawBand(g, cx, cy, null, k, time, def.moveTime, TIRE, W);
+        g.fillStyle = TIRE[1];
+        g.beginPath(); g.arc(cx, cy, cs * 0.3, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = TIRE[2]; g.lineWidth = Math.max(1, cs * 0.05);
+        g.beginPath(); g.arc(cx, cy, cs * 0.18, 0, Math.PI * 2); g.stroke();
+      }
+      for (const k of outs) this.drawOutArrow(g, cx, cy, DIRS[k], k === e.dir ? COL.paper : '#e8d27a');
+      if (live && this.world.junctionError(x, y)) {
+        g.fillStyle = 'rgba(195,18,63,0.35)';
+        g.fillRect(px, py, cs, cs);
+        g.fillStyle = COL.ruby;
+        g.beginPath(); g.arc(cx, cy, cs * 0.22, 0, Math.PI * 2); g.fill();
+        g.fillStyle = COL.paper;
+        g.font = `700 ${Math.round(cs * 0.32)}px "DotGothic16", sans-serif`;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText('!', cx, cy + 1);
+      }
+    }
+
+    drawSorter(g, e, x, y, time, live) {
+      const cs = this.cs, px = this.sx(x), py = this.sy(y);
+      const cx = px + cs / 2, cy = py + cs / 2;
+      const def = GA.EQUIPMENT[e.type];
+      const sides = this.world.sorterSides(e);
+      const TIRE = ['#1f2022', '#3a3c3f', '#5d6064'];
+      const SORT = ['#1f2022', '#6b5a2a', '#c9a43a'];
+      this.drawBand(g, cx, cy, null, sides.out, time, def.moveTime, SORT, [0.5, 0.4, 0.3]);
+      this.drawBand(g, cx, cy, (e.dir + 2) % 4, e.dir, time, def.moveTime, TIRE, [0.64, 0.52, 0.4]);
+      // 比較マス側の「目」
+      const r = DIRS[sides.ref];
+      const ex = cx + r.x * cs * 0.36, ey = cy + r.y * cs * 0.36;
+      g.fillStyle = '#c9a43a';
+      g.beginPath(); g.arc(ex, ey, cs * 0.12, 0, Math.PI * 2); g.fill();
+      g.fillStyle = COL.ink;
+      g.beginPath(); g.arc(ex + r.x * cs * 0.03, ey + r.y * cs * 0.03, cs * 0.05, 0, Math.PI * 2); g.fill();
+      this.drawOutArrow(g, cx, cy, DIRS[e.dir], COL.paper);
+      this.drawOutArrow(g, cx, cy, DIRS[sides.out], '#e8d27a');
+    }
+
+    // 仕分けコンベアの比較マスを点線で示す
+    drawSorterRef(g, e, x, y) {
+      const cs = this.cs;
+      const r = DIRS[this.world.sorterSides(e).ref];
+      const rx = x + r.x, ry = y + r.y;
+      if (!this.world.inBounds(rx, ry)) return;
+      g.strokeStyle = 'rgba(201,164,58,0.9)';
+      g.lineWidth = Math.max(1, cs * 0.04);
+      g.setLineDash([cs * 0.1, cs * 0.08]);
+      g.strokeRect(this.sx(rx) + cs * 0.12, this.sy(ry) + cs * 0.12, cs * 0.76, cs * 0.76);
+      g.setLineDash([]);
     }
 
     // ---- オブジェクト ----
@@ -318,7 +385,7 @@
       let scale = 1;
       const kind = c.equip ? GA.EQUIPMENT[c.equip.type].kind : null;
       if (kind === 'processor' && o.t >= 1) scale = 0.55;
-      if (kind === 'disposal' && o.t >= 1) scale = Math.max(0.1, 1 - o.work / GA.EQUIPMENT[c.equip.type].workTime);
+      if (kind === 'disposal') scale = Math.max(0.1, 1 - o.work / GA.EQUIPMENT[c.equip.type].workTime);
       this.drawObj(g, o.type, this.sx(x), this.sy(y), this.cs * 0.3 * scale, o.id);
     }
 

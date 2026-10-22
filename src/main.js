@@ -13,6 +13,7 @@
   const ui = {
     tool: { kind: 'inspect' },
     dir: 1,
+    mirror: 0,
     speed: 1,
     hover: null,
     hoverPrincess: false,
@@ -44,11 +45,30 @@
 
   function setInfo(html) { $('info').innerHTML = html; }
 
+  const sideName = k => DIRS[k].name;
+
+  function sorterText(dir, mirror) {
+    const s = world.sorterSides({ dir, mirror });
+    return `本流の先 ${sideName(dir)}／仕分け先 ${sideName(s.out)}／比較マス ${sideName(s.ref)}`;
+  }
+
+  function placingMirrorable() {
+    return ui.tool.kind === 'place' && GA.EQUIPMENT[ui.tool.type].mirrorable;
+  }
+
+  // 回転ボタンの表示。仕分けコンベアは「本流の向き＋仕分け先の向き」
+  function updateRotateBtn() {
+    let label = DIRS[ui.dir].arrow;
+    if (placingMirrorable()) label += `<small>${DIRS[world.sorterSides({ dir: ui.dir, mirror: ui.mirror }).out].arrow}</small>`;
+    $('rotate').innerHTML = label;
+  }
+
   function toolHint() {
     const t = ui.tool;
     if (t.kind === 'place') {
       const def = GA.EQUIPMENT[t.type];
-      return `<b>${def.name}</b>を置く（向き ${DIRS[ui.dir].arrow}）。ドラッグで連続配置、置いてある設備をタップで回転。`;
+      const dir = def.mirrorable ? sorterText(ui.dir, ui.mirror) : `向き ${DIRS[ui.dir].arrow}`;
+      return `<b>${def.name}</b>を置く（${dir}）。ドラッグで連続配置、置いてある設備をタップで回転。`;
     }
     if (t.kind === 'recall') return '<b>回収</b>：タップした設備をインベントリに戻す。上に乗っていたものはその場に残る。';
     if (t.kind === 'reset') return '<b>リセット</b>：タップしたマスのオブジェクトを消す。詰まったときに。';
@@ -60,9 +80,22 @@
     const parts = [];
     if (c.equip) {
       const def = GA.EQUIPMENT[c.equip.type];
-      const dir = def.directional ? `（向き ${DIRS[c.equip.dir].arrow}）` : '';
+      let dir = def.directional ? `（向き ${DIRS[c.equip.dir].arrow}）` : '';
       const limit = def.maxPlaced ? `（設置 ${world.countPlaced(c.equip.type)}/${def.maxPlaced}）` : '';
+      if (def.mode === 'junction') {
+        const outs = world.outputsOf(x, y);
+        const ins = world.inputsOf(x, y).filter(k => !outs.includes(k));
+        const list = ks => ks.length ? ks.map(sideName).join('・') : 'なし';
+        dir = `（入口 ${list(ins)}／出口 ${list(outs)}）`;
+      }
+      if (def.mode === 'sorter') {
+        const ref = world.sorterSides(c.equip).ref;
+        const rc = world.cell(x + DIRS[ref].x, y + DIRS[ref].y);
+        const refObj = rc && rc.obj ? GA.OBJECTS[rc.obj.type].name : '空';
+        dir = `（${sorterText(c.equip.dir, c.equip.mirror)}・今は${refObj}）`;
+      }
       parts.push(`<b>${def.name}</b>${dir}${limit}：${def.desc}`);
+      if (world.junctionError(x, y)) parts.push('<b>エラー</b>：4方向すべてが入口、またはすべてが出口になっているため止まっている。周りのタイヤコンベアの向きを変えてほしい。');
     }
     if (c.obj) {
       const od = GA.OBJECTS[c.obj.type];
@@ -130,6 +163,7 @@
       }
       b.addEventListener('click', () => {
         ui.tool = type ? { kind, type } : { kind };
+        if (!placingMirrorable()) ui.mirror = 0;
         buildToolbar();
         setInfo(toolHint());
       });
@@ -140,7 +174,7 @@
     mk('リセット', 'reset');
     const sep = document.createElement('span'); sep.className = 'sep'; bar.appendChild(sep);
     for (const type of GA.SHOP_ORDER) mk(GA.EQUIPMENT[type].name, 'place', type, world.inv[type] || 0);
-    $('rotate').textContent = DIRS[ui.dir].arrow;
+    updateRotateBtn();
   }
 
   function invChanged() {
@@ -150,9 +184,15 @@
     refreshHud();
   }
 
+  // 仕分けコンベアを置くときは「左右反転」を挟んで8段階で一周
   function rotate(step) {
-    ui.dir = (ui.dir + step + 4) % 4;
-    $('rotate').textContent = DIRS[ui.dir].arrow;
+    if (placingMirrorable()) {
+      const i = (ui.dir * 2 + ui.mirror + step + 8) % 8;
+      ui.dir = i >> 1; ui.mirror = i & 1;
+    } else {
+      ui.dir = (ui.dir + step + 4) % 4;
+    }
+    updateRotateBtn();
     setInfo(toolHint());
   }
 
@@ -208,7 +248,7 @@
     if (t.kind === 'place') {
       const c = world.cell(x, y);
       if (c.equip && !first) return false; // ドラッグ中は空きマスだけに置く
-      res = world.place(t.type, x, y, ui.dir);
+      res = world.place(t.type, x, y, ui.dir, ui.mirror);
       if (res.ok) invChanged();
     } else if (t.kind === 'recall') {
       res = world.recall(x, y);
@@ -268,9 +308,11 @@
       if (ui.tool.kind === 'place') {
         const k = dirBetween(d.last, next);
         const lastCell = world.cell(d.last.x, d.last.y);
-        const extendsLine = lastCell && lastCell.equip && lastCell.equip.type === ui.tool.type;
-        if (d.placedLast || (d.deferred && extendsLine && d.last === d.start)) world.setDir(d.last.x, d.last.y, k);
-        if (ui.dir !== k) { ui.dir = k; $('rotate').textContent = DIRS[k].arrow; }
+        // 置いてある列の「端」からドラッグしたときだけ、その端の向きを付け替える（途中から分岐させるときは変えない）
+        const front = lastCell && lastCell.equip ? world.cell(d.last.x + DIRS[lastCell.equip.dir].x, d.last.y + DIRS[lastCell.equip.dir].y) : null;
+        const isLineEnd = lastCell && lastCell.equip && lastCell.equip.type === ui.tool.type && !(front && front.equip);
+        if (d.placedLast || (d.deferred && isLineEnd && d.last === d.start)) world.setDir(d.last.x, d.last.y, k);
+        if (ui.dir !== k) { ui.dir = k; updateRotateBtn(); }
       }
       d.placedLast = applyAt(next.x, next.y, false);
       d.last = next;
@@ -341,6 +383,14 @@
     toast(`オブジェクトを${n}個リセットしました`);
     $('menu').hidden = true;
   });
+  if (C.testMode) {
+    $('test-tonic').hidden = false;
+    $('test-tonic').addEventListener('click', () => {
+      world.tonic += C.testTonic;
+      refreshHud();
+      toast(`テスト用：ローズ・トニックを${C.testTonic}追加しました`);
+    });
+  }
   twoStep($('new-game'), '最初からやり直す', 'もう一度押すと最初から', () => {
     world.reset();
     invChanged();
@@ -384,7 +434,7 @@
   function start(hotData) {
     const data = (hotData && hotData.save) || loadSaved();
     if (data) world.load(data);
-    if (hotData && hotData.ui) { ui.dir = hotData.ui.dir; setSpeed(hotData.ui.speed); }
+    if (hotData && hotData.ui) { ui.dir = hotData.ui.dir; ui.mirror = hotData.ui.mirror || 0; setSpeed(hotData.ui.speed); }
     fit();
     buildToolbar();
     refreshHud();
@@ -395,6 +445,6 @@
 
   GA.debug = { world, renderer, ui }; // 開発用（コンソールから状態を覗く）
 
-  window.claude?.hot?.snapshot?.(() => ({ save: world.serialize(), ui: { dir: ui.dir, speed: ui.speed } }));
+  window.claude?.hot?.snapshot?.(() => ({ save: world.serialize(), ui: { dir: ui.dir, mirror: ui.mirror, speed: ui.speed } }));
   window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
 })();

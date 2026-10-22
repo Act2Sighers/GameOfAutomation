@@ -6,6 +6,11 @@
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const randInt = (a, b) => Math.floor(rand(a, b + 1));
+  // a から見て b がある方向（隣接していなければ null）
+  const sideOf = (ax, ay, bx, by) => {
+    for (let k = 0; k < 4; k++) if (ax + DIRS[k].x === bx && ay + DIRS[k].y === by) return k;
+    return null;
+  };
 
   class World {
     constructor() {
@@ -20,7 +25,7 @@
       this.w = C.gridW;
       this.h = C.gridH;
       this.cells = Array.from({ length: this.w * this.h }, () => ({ equip: null, obj: null }));
-      this.tonic = C.startTonic;
+      this.tonic = C.testMode ? C.testTonic : C.startTonic;
       this.inv = { ...C.starterKit };
       this.customers = [];
       this.effects = [];
@@ -39,7 +44,8 @@
       for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) fn(this.cells[y * this.w + x], x, y);
     }
 
-    makeEquip(type, dir) { return { type, dir, timer: 0 }; }
+    makeEquip(type, dir, mirror) { return { type, dir, mirror: mirror ? 1 : 0, timer: 0, rrIn: 0, rrOut: 0 }; }
+    equipAt(x, y) { const c = this.cell(x, y); return c ? c.equip : null; }
 
     // オブジェクトを載せられない設備（生成所・インテリア）
     holdsNoObjects(type) {
@@ -65,43 +71,149 @@
       return { id: this.nextId++, type, x, y, fx: x, fy: y, t: 1, dur: 0, work: 0, done: false, claimedBy: 0 };
     }
 
+    // ---- コンベアの接続 ----
+
+    // 仕分けコンベアの比較マスと仕分け先の方向。mirror で左右が入れ替わる
+    sorterSides(e) {
+      const m = e.mirror ? 3 : 1;
+      return { ref: (e.dir + m) % 4, out: (e.dir + 4 - m) % 4 };
+    }
+
+    // 設備がオブジェクトを出す方向の一覧
+    // タイヤコンベアは自分の向きに加えて、「自分から離れる向きに置かれた隣のタイヤコンベア」にも出す（分配）
+    outputsOf(x, y) {
+      const e = this.equipAt(x, y);
+      if (!e) return [];
+      const def = GA.EQUIPMENT[e.type];
+      if (def.kind === 'generator' || def.kind === 'processor') return [e.dir];
+      if (def.kind !== 'conveyor') return [];
+      if (def.mode === 'sorter') return [e.dir, this.sorterSides(e).out];
+      if (def.mode === 'junction') {
+        const res = [e.dir];
+        for (let k = 0; k < 4; k++) {
+          if (k === e.dir) continue;
+          const n = this.equipAt(x + DIRS[k].x, y + DIRS[k].y);
+          if (n && GA.EQUIPMENT[n.type].mode === 'junction' && n.dir === k) res.push(k);
+        }
+        return res;
+      }
+      return [e.dir];
+    }
+
+    // このマスへオブジェクトを出してくる隣接設備の方向
+    inputsOf(x, y) {
+      const res = [];
+      for (let k = 0; k < 4; k++) {
+        if (this.outputsOf(x + DIRS[k].x, y + DIRS[k].y).includes((k + 2) % 4)) res.push(k);
+      }
+      return res;
+    }
+
+    // 4方向すべてが入口、またはすべてが出口になったタイヤコンベアはエラーで停止する
+    junctionError(x, y) {
+      const e = this.equipAt(x, y);
+      if (!e || GA.EQUIPMENT[e.type].mode !== 'junction') return false;
+      return this.inputsOf(x, y).length === 4 || this.outputsOf(x, y).length === 4;
+    }
+
+    // (sx,sy) の設備が、今まさに (tx,ty) へオブジェクトを出したがっているか
+    wantsInto(sx, sy, tx, ty) {
+      const c = this.cell(sx, sy);
+      if (!c || !c.equip) return false;
+      const e = c.equip, def = GA.EQUIPMENT[e.type];
+      const k = sideOf(sx, sy, tx, ty);
+      if (def.kind === 'generator') return e.timer >= def.interval && e.dir === k;
+      const o = c.obj;
+      if (!o || o.t < 1) return false;
+      if (def.kind === 'processor') return o.done && e.dir === k;
+      if (def.kind !== 'conveyor') return false;
+      if (def.mode === 'sorter') return o.route === k;
+      if (def.mode === 'junction') return !this.junctionError(sx, sy) && this.outputsOf(sx, sy).includes(k);
+      return e.dir === k;
+    }
+
     // ---- 受け入れ判定・移動 ----
 
-    canAccept(x, y) {
+    // (sx,sy) は送り元。タイヤコンベアへの合流は、入口を順番に回して均等に受け入れる
+    canAccept(x, y, sx, sy) {
       const c = this.cell(x, y);
       if (!c || c.obj) return false;
       if (!c.equip) return true; // 何も無い地面にはそのまま置かれる
-      return !this.holdsNoObjects(c.equip.type);
+      if (this.holdsNoObjects(c.equip.type)) return false;
+      if (GA.EQUIPMENT[c.equip.type].mode === 'junction') {
+        if (this.junctionError(x, y)) return false;
+        const k = sx === undefined ? null : sideOf(x, y, sx, sy);
+        if (k !== null) {
+          for (let i = 0; i < 4; i++) {
+            const j = (c.equip.rrIn + i) % 4;
+            if (j === k) break;
+            if (this.wantsInto(x + DIRS[j].x, y + DIRS[j].y, x, y)) return false; // 順番が先の入口が待っている
+          }
+        }
+      }
+      return true;
+    }
+
+    noteEntry(tx, ty, sx, sy) {
+      const e = this.equipAt(tx, ty);
+      const k = sideOf(tx, ty, sx, sy);
+      if (e && k !== null && GA.EQUIPMENT[e.type].mode === 'junction') e.rrIn = (k + 1) % 4;
     }
 
     moveObj(obj, tx, ty, dur) {
-      this.cell(obj.x, obj.y).obj = null;
-      obj.fx = obj.x; obj.fy = obj.y;
+      const sx = obj.x, sy = obj.y;
+      this.cell(sx, sy).obj = null;
+      obj.fx = sx; obj.fy = sy;
       obj.x = tx; obj.y = ty;
       obj.t = 0; obj.dur = dur;
-      obj.work = 0; obj.done = false;
+      obj.work = 0; obj.done = false; obj.route = undefined;
       this.cell(tx, ty).obj = obj;
+      this.noteEntry(tx, ty, sx, sy);
     }
 
     tryPush(x, y, dir, dur) {
       const c = this.cell(x, y);
       const d = DIRS[dir];
       const tx = x + d.x, ty = y + d.y;
-      if (!this.canAccept(tx, ty)) return false;
+      if (!this.canAccept(tx, ty, x, y)) return false;
       this.moveObj(c.obj, tx, ty, dur);
       return true;
     }
 
+    // タイヤコンベア: 出口を順番に回し、受け入れられる出口へ流す（来た方向には戻さない）
+    routeJunction(x, y, e, o, def) {
+      if (this.junctionError(x, y)) return;
+      const outs = this.outputsOf(x, y);
+      const inSide = sideOf(x, y, o.fx, o.fy);
+      for (let i = 0; i < 4; i++) {
+        const d = (e.rrOut + i) % 4;
+        if (!outs.includes(d) || d === inSide) continue;
+        if (this.tryPush(x, y, d, def.moveTime)) { e.rrOut = (d + 1) % 4; return; }
+      }
+    }
+
+    // 仕分けコンベア: 乗った時点で比較マスのオブジェクトを見て行き先を決める
+    routeSorter(x, y, e, o, def) {
+      if (o.route === undefined) {
+        const sides = this.sorterSides(e);
+        const ref = this.cell(x + DIRS[sides.ref].x, y + DIRS[sides.ref].y);
+        o.route = ref && ref.obj && ref.obj.type === o.type ? sides.out : e.dir;
+      }
+      this.tryPush(x, y, o.route, def.moveTime);
+    }
+
     // ---- プレイヤー操作 ----
 
-    place(type, x, y, dir) {
+    place(type, x, y, dir, mirror) {
       const c = this.cell(x, y);
       if (!c) return { ok: false };
       const def = GA.EQUIPMENT[type];
       if (c.equip && c.equip.type === type) {
         // 同じ設備でタップしたら回転（在庫が無くてもよい）
         if (!def.directional) return { ok: false };
-        c.equip.dir = dir === c.equip.dir ? (dir + 1) % 4 : dir;
+        if (dir === c.equip.dir && (!def.mirrorable || !!mirror === !!c.equip.mirror)) this.rotateAt(x, y);
+        else { c.equip.dir = dir; c.equip.mirror = def.mirrorable && mirror ? 1 : 0; }
+        if (c.obj) c.obj.route = undefined;
         return { ok: true, rotated: true };
       }
       if ((this.inv[type] || 0) <= 0) return { ok: false, msg: `${def.name}の在庫がありません` };
@@ -110,7 +222,7 @@
       }
       if (this.holdsNoObjects(type) && c.obj) return { ok: false, msg: 'オブジェクトがあるマスには置けません' };
       if (c.equip) this.recall(x, y);
-      c.equip = this.makeEquip(type, dir);
+      c.equip = this.makeEquip(type, dir, def.mirrorable && mirror);
       this.inv[type]--;
       if (c.obj) { c.obj.work = 0; c.obj.done = false; }
       return { ok: true };
@@ -121,10 +233,16 @@
       if (c && c.equip && GA.EQUIPMENT[c.equip.type].directional) c.equip.dir = dir;
     }
 
+    // 回転。仕分けコンベアは「同じ向きで左右反転」を挟むので8回で一周
     rotateAt(x, y) {
       const c = this.cell(x, y);
-      if (!c || !c.equip || !GA.EQUIPMENT[c.equip.type].directional) return false;
-      c.equip.dir = (c.equip.dir + 1) % 4;
+      if (!c || !c.equip) return false;
+      const def = GA.EQUIPMENT[c.equip.type];
+      if (!def.directional) return false;
+      const e = c.equip;
+      if (def.mirrorable && !e.mirror) e.mirror = 1;
+      else { e.mirror = 0; e.dir = (e.dir + 1) % 4; }
+      if (c.obj) c.obj.route = undefined;
       return true;
     }
 
@@ -199,17 +317,21 @@
             if (e.timer >= def.interval) {
               const d = DIRS[e.dir];
               const tx = x + d.x, ty = y + d.y;
-              if (this.canAccept(tx, ty)) {
+              if (this.canAccept(tx, ty, x, y)) {
                 const obj = this.makeObj(def.produces, tx, ty);
                 obj.fx = x; obj.fy = y; obj.t = 0; obj.dur = 0.4;
                 this.cell(tx, ty).obj = obj;
+                this.noteEntry(tx, ty, x, y);
                 e.timer = 0;
               }
             }
             break;
           }
           case 'conveyor':
-            if (arrived) this.tryPush(x, y, e.dir, def.moveTime);
+            if (!arrived) break;
+            if (def.mode === 'junction') this.routeJunction(x, y, e, o, def);
+            else if (def.mode === 'sorter') this.routeSorter(x, y, e, o, def);
+            else this.tryPush(x, y, e.dir, def.moveTime);
             break;
           case 'processor':
             if (!arrived) break;
@@ -225,9 +347,10 @@
             }
             break;
           case 'disposal':
-            if (!arrived) break;
+            // 入ってくる途中から処理を始める（バケツコンベアの流れに追いつく速さにするため）
+            if (!o) break;
             o.work += dt;
-            if (o.work >= def.workTime) c.obj = null;
+            if (arrived && o.work >= def.workTime) c.obj = null;
             break;
         }
       });
@@ -406,7 +529,7 @@
     serialize() {
       const cells = [], objects = [];
       this.forEachCell((c, x, y) => {
-        if (c.equip) cells.push({ x, y, type: c.equip.type, dir: c.equip.dir });
+        if (c.equip) cells.push({ x, y, type: c.equip.type, dir: c.equip.dir, mirror: c.equip.mirror });
         if (c.obj) objects.push({ x, y, type: c.obj.type, done: c.obj.done });
       });
       return { v: 1, tonic: this.tonic, inv: { ...this.inv }, cells, objects, stats: { ...this.stats } };
@@ -421,7 +544,7 @@
       this.stats = { ...this.stats, ...data.stats };
       for (const e of data.cells) {
         const type = GA.LEGACY_TYPES[e.type] || e.type;
-        if (GA.EQUIPMENT[type] && this.inBounds(e.x, e.y)) this.cell(e.x, e.y).equip = this.makeEquip(type, e.dir);
+        if (GA.EQUIPMENT[type] && this.inBounds(e.x, e.y)) this.cell(e.x, e.y).equip = this.makeEquip(type, e.dir, e.mirror);
       }
       for (const o of data.objects) {
         if (GA.OBJECTS[o.type] && this.inBounds(o.x, o.y)) {

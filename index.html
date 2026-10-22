@@ -109,6 +109,7 @@
     font-family: var(--font-display); font-size: 12px; color: var(--brass);
   }
   .sep { flex: none; width: 1px; background: var(--line); margin: 4px 2px; }
+  #rotate small { font-size: 15px; color: var(--brass); margin-left: 1px; }
   #rotate {
     flex: none; width: 56px;
     font-family: var(--font-display); font-size: 24px;
@@ -164,7 +165,7 @@
 </style>
 
 <header>
-  <div class="brand">ガラクタ姫の異食レストラン<small>試作 0.2</small></div>
+  <div class="brand">ガラクタ姫の異食レストラン<small>試作 0.3</small></div>
   <div class="stat tonic" title="ローズ・トニック">
     <svg viewBox="0 0 14 18" aria-hidden="true"><path d="M7 0C10 5 13 8 13 11.5A6 6 0 0 1 1 11.5C1 8 4 5 7 0Z" fill="#c3123f"/><circle cx="4.6" cy="11.6" r="1.4" fill="#ffffff" opacity=".5"/></svg>
     <span id="tonic">0</span>
@@ -214,13 +215,16 @@
     <ul class="help">
       <li>下の棚から設備を選び、空きマスを<b>タップ</b>で配置。<b>ドラッグ</b>するとその方向に向けて連続配置。</li>
       <li><b>見る・回す</b>モードで設備をタップすると<b>回転</b>。同じ設備を選んでタップしても回転、違う設備なら入れ替え。</li>
-      <li>向きは右下の矢印ボタン、<b>R</b> キー、右クリック、ホイールで回せる。</li>
+      <li>向きは右下の矢印ボタン、<b>R</b> キー、右クリック、ホイールで回せる。仕分けコンベアは向き4つ×左右反転の<b>8段階</b>で一周する。</li>
+      <li><b>タイヤコンベア</b>は、隣のタイヤコンベアが自分から離れる向きに置かれていると、そちらにも分配する。複数の方向から流れ込むと順番に合流する。</li>
+      <li><b>仕分けコンベア</b>は、点線で示した比較マスにあるオブジェクトと同じものを黄色い矢印の方へ、それ以外を白い矢印の方へ流す。</li>
       <li><b>ガラクタ姫</b>（盤面の左）をタップするとショップ。</li>
       <li>ロボットたちは<b>客寄せ看板</b>の周りに集まり、レジャーシートに料理が乗ると近いものから食べに来てローズ・トニックを払う。看板が増えるほど客も増える（5つまで）。</li>
       <li>キー: <b>1〜9</b> 道具の選択、<b>Esc</b> 見るモード、<b>Space</b> 一時停止。</li>
     </ul>
     <div class="menu-list">
       <button type="button" class="btn" id="reset-objects">画面上のオブジェクトをすべてリセット</button>
+      <button type="button" class="btn" id="test-tonic" hidden>テスト用：ローズ・トニック +999</button>
       <button type="button" class="btn" id="new-game">最初からやり直す</button>
     </div>
     <p class="note">進行はこのブラウザに自動保存される。</p>

@@ -28,14 +28,25 @@ GA.PROCESSES = {
 
 // 設備。kind は generator / conveyor / processor / storage / disposal / interior
 // directional: 向きに意味がある設備。maxPlaced: 盤面に置ける上限
+// conveyor の mode: simple = 一方向に流すだけ / junction = 分配・合流 / sorter = 仕分け
+// conveyor の family: 系統（バケツ系・タイヤ系）。今は見た目と説明だけに使う
 GA.EQUIPMENT = {
   gomi_container: {
     name: 'ゴミコンテナ', kind: 'generator', directional: true, produces: 'gomi', interval: 2.0, price: 15,
     desc: '向いている方向の隣マスが空いていれば「ゴミ」を生成する。',
   },
   bucket_conveyor: {
-    name: 'バケツコンベア', kind: 'conveyor', directional: true, moveTime: 1.2, price: 2,
+    name: 'バケツコンベア', kind: 'conveyor', mode: 'simple', family: 'bucket', directional: true, moveTime: 1.2, price: 2,
     desc: '乗ったオブジェクトを向いている方向へ運ぶ。遅い。分配・合流・仕分け機能なし。',
+  },
+  tire_conveyor: {
+    name: 'タイヤコンベア', kind: 'conveyor', mode: 'junction', family: 'tire', directional: true, moveTime: 0.8, price: 5,
+    desc: 'バケツより速いコンベア。複数の方向から合流でき、横や後ろに出ていくタイヤコンベアがあれば均等に分配する。',
+  },
+  tire_sorter: {
+    name: '仕分けコンベア・タイヤ', kind: 'conveyor', mode: 'sorter', family: 'tire', directional: true, mirrorable: true,
+    moveTime: 0.8, price: 12,
+    desc: '比較マスにあるオブジェクトと同じものは仕分け先へ、違うもの（比較マスが空のときも）は本流の先へ流す。',
   },
   neriki: {
     name: '練り機', kind: 'processor', directional: true, process: 'neri', workTime: 2.0, outTime: 0.6, price: 10,
@@ -59,12 +70,14 @@ GA.EQUIPMENT = {
 GA.LEGACY_TYPES = { sign: 'kyakuyose_kanban' };
 
 // ショップに並ぶ順番
-GA.SHOP_ORDER = ['gomi_container', 'bucket_conveyor', 'neriki', 'leisure_sheet', 'shredder', 'kyakuyose_kanban'];
+GA.SHOP_ORDER = ['gomi_container', 'bucket_conveyor', 'tire_conveyor', 'tire_sorter', 'neriki', 'leisure_sheet', 'shredder', 'kyakuyose_kanban'];
 
 GA.CONFIG = {
   gridW: 11,
   gridH: 9,
   border: 2,            // 画面上に描く外周のガラクタ山の厚さ（マス）
+  testMode: true,       // テスト用: 初期トニック testTonic、メニューにトニック補充ボタン
+  testTonic: 999,
   startTonic: 0,
   starterKit: { gomi_container: 1, bucket_conveyor: 6, neriki: 1, leisure_sheet: 1, shredder: 1 },
   sellRate: 0.5,        // 売却価格 = 購入価格 × sellRate（切り捨て）
