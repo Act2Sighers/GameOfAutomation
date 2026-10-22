@@ -73,8 +73,9 @@
 
     // ---- コンベアの接続 ----
 
-    // 仕分けコンベアの比較マスと仕分け先の方向。mirror で左右が入れ替わる
-    sorterSides(e) {
+    // 向き＋左右反転を持つ設備（仕分けコンベア・分別機）の横方向。
+    // out = 横の出口、ref = その反対側（仕分けコンベアの比較マス）。mirror で左右が入れ替わる
+    branchSides(e) {
       const m = e.mirror ? 3 : 1;
       return { ref: (e.dir + m) % 4, out: (e.dir + 4 - m) % 4 };
     }
@@ -85,9 +86,10 @@
       const e = this.equipAt(x, y);
       if (!e) return [];
       const def = GA.EQUIPMENT[e.type];
+      if (def.kind === 'processor' && def.mirrorable) return [e.dir, this.branchSides(e).out];
       if (def.kind === 'generator' || def.kind === 'processor') return [e.dir];
       if (def.kind !== 'conveyor') return [];
-      if (def.mode === 'sorter') return [e.dir, this.sorterSides(e).out];
+      if (def.mode === 'sorter') return [e.dir, this.branchSides(e).out];
       if (def.mode === 'junction') {
         const res = [e.dir];
         for (let k = 0; k < 4; k++) {
@@ -123,6 +125,7 @@
       const e = c.equip, def = GA.EQUIPMENT[e.type];
       const k = sideOf(sx, sy, tx, ty);
       if (def.kind === 'generator') return e.timer >= def.interval && e.dir === k;
+      if (def.kind === 'processor' && e.pending && this.branchSides(e).out === k) return true;
       const o = c.obj;
       if (!o || o.t < 1) return false;
       if (def.kind === 'processor') return o.done && e.dir === k;
@@ -140,6 +143,7 @@
       if (!c || c.obj) return false;
       if (!c.equip) return true; // 何も無い地面にはそのまま置かれる
       if (this.holdsNoObjects(c.equip.type)) return false;
+      if (c.equip.pending) return false; // 分別機は2つとも出し終えるまで次を受け取らない
       if (GA.EQUIPMENT[c.equip.type].mode === 'junction') {
         if (this.junctionError(x, y)) return false;
         const k = sx === undefined ? null : sideOf(x, y, sx, sy);
@@ -192,10 +196,40 @@
       }
     }
 
+    // 加工所: 加工が終わったら向いている方向へ出す。
+    // 分別（split）は2つ目のオブジェクトを設備側（e.pending）に持ち、横の出口から別に出す
+    runProcessor(x, y, e, o, def, dt) {
+      const proc = GA.PROCESSES[def.process];
+      if (!o.done) {
+        const recipe = proc.recipes[o.type];
+        if (!recipe && proc.onMissing === 'pass') { o.done = true; o.passed = true; } // 加工せずにそのまま流す
+        else {
+          o.work += dt;
+          if (o.work < def.workTime) return;
+          if (!recipe) o.type = GA.FALLBACK_OBJECT;
+          else if (proc.type === 'split') { o.type = recipe[0]; e.pending = this.makeObj(recipe[1], x, y); }
+          else o.type = recipe;
+          o.done = true;
+        }
+      }
+      this.tryPush(x, y, e.dir, def.outTime);
+    }
+
+    pushPending(x, y, e, def) {
+      const d = DIRS[this.branchSides(e).out];
+      const tx = x + d.x, ty = y + d.y;
+      if (!this.canAccept(tx, ty, x, y)) return;
+      const p = e.pending;
+      e.pending = null;
+      p.fx = x; p.fy = y; p.x = tx; p.y = ty; p.t = 0; p.dur = def.outTime;
+      this.cell(tx, ty).obj = p;
+      this.noteEntry(tx, ty, x, y);
+    }
+
     // 仕分けコンベア: 乗った時点で比較マスのオブジェクトを見て行き先を決める
     routeSorter(x, y, e, o, def) {
       if (o.route === undefined) {
-        const sides = this.sorterSides(e);
+        const sides = this.branchSides(e);
         const ref = this.cell(x + DIRS[sides.ref].x, y + DIRS[sides.ref].y);
         o.route = ref && ref.obj && !ref.obj.held && ref.obj.type === o.type ? sides.out : e.dir;
       }
@@ -251,21 +285,28 @@
       if (!c || !c.equip) return { ok: false };
       const def = GA.EQUIPMENT[c.equip.type];
       this.inv[c.equip.type] = (this.inv[c.equip.type] || 0) + 1;
+      // 分別機に残っていた2つ目は、マスが空いていれば地面に残す（空いていなければ消える）
+      const pending = c.equip.pending;
       c.equip = null;
+      if (pending && !c.obj) c.obj = pending;
       if (c.obj) { c.obj.work = 0; c.obj.done = false; } // 中身は地面に残る
       return { ok: true, type: def.name };
     }
 
     removeObjAt(x, y) {
       const c = this.cell(x, y);
-      if (!c || !c.obj) return false;
+      if (!c || (!c.obj && !(c.equip && c.equip.pending))) return false;
       c.obj = null;
+      if (c.equip) c.equip.pending = null;
       return true;
     }
 
     resetAllObjects() {
       let n = 0;
-      this.forEachCell(c => { if (c.obj) { c.obj = null; n++; } });
+      this.forEachCell(c => {
+        if (c.obj) { c.obj = null; n++; }
+        if (c.equip && c.equip.pending) { c.equip.pending = null; n++; }
+      });
       return n;
     }
 
@@ -365,17 +406,8 @@
             else this.tryPush(x, y, e.dir, def.moveTime);
             break;
           case 'processor':
-            if (!arrived) break;
-            if (!o.done) {
-              o.work += dt;
-              if (o.work >= def.workTime) {
-                const recipes = GA.PROCESSES[def.process].recipes;
-                o.type = recipes[o.type] || GA.FALLBACK_OBJECT;
-                o.done = true;
-              }
-            } else {
-              this.tryPush(x, y, e.dir, def.outTime);
-            }
+            if (e.pending) this.pushPending(x, y, e, def);
+            if (arrived) this.runProcessor(x, y, e, o, def, dt);
             break;
           case 'disposal':
             // 入ってくる途中から処理を始める（バケツコンベアの流れに追いつく速さにするため）
@@ -559,10 +591,10 @@
           case 'eat': {
             if (!this.targetStillValid(cu)) { cu.state = 'browse'; cu.target = null; break; }
             cu.wait += dt;
-            if (cu.wait >= CC.eatTime) {
-              const c = this.cell(cu.target.x, cu.target.y);
-              const odef = GA.OBJECTS[c.obj.type];
-              const pay = GA.RARITIES[odef.rarity].tonic;
+            const c = this.cell(cu.target.x, cu.target.y);
+            const odef = GA.OBJECTS[c.obj.type];
+            if (cu.wait >= CC.eatTime * (odef.eatTimeMul || 1)) {
+              const pay = odef.rarity;
               c.obj = null;
               this.tonic += pay;
               this.stats.served++;
@@ -589,7 +621,7 @@
     serialize() {
       const cells = [], objects = [];
       this.forEachCell((c, x, y) => {
-        if (c.equip) cells.push({ x, y, type: c.equip.type, dir: c.equip.dir, mirror: c.equip.mirror });
+        if (c.equip) cells.push({ x, y, type: c.equip.type, dir: c.equip.dir, mirror: c.equip.mirror, pending: c.equip.pending ? c.equip.pending.type : undefined });
         if (c.obj) objects.push({ x, y, type: c.obj.type, done: c.obj.done });
       });
       return { v: 1, tonic: this.tonic, inv: { ...this.inv }, cells, objects, stats: { ...this.stats } };
@@ -604,7 +636,11 @@
       this.stats = { ...this.stats, ...data.stats };
       for (const e of data.cells) {
         const type = GA.LEGACY_TYPES[e.type] || e.type;
-        if (GA.EQUIPMENT[type] && this.inBounds(e.x, e.y)) this.cell(e.x, e.y).equip = this.makeEquip(type, e.dir, e.mirror);
+        if (GA.EQUIPMENT[type] && this.inBounds(e.x, e.y)) {
+          const eq = this.makeEquip(type, e.dir, e.mirror);
+          if (e.pending && GA.OBJECTS[e.pending]) eq.pending = this.makeObj(e.pending, e.x, e.y);
+          this.cell(e.x, e.y).equip = eq;
+        }
       }
       for (const o of data.objects) {
         if (GA.OBJECTS[o.type] && this.inBounds(o.x, o.y)) {

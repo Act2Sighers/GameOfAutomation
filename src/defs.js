@@ -9,21 +9,28 @@ GA.DIRS = [
   { x: -1, y: 0, name: '左', arrow: '←' },
 ];
 
-// レアリティ: 料理を食べたロボットが支払うローズ・トニックの量
-GA.RARITIES = {
-  common: { name: 'コモン', tonic: 1 },
-};
-
 // オブジェクト。category が 'dish' のものだけがレジャーシートで食べられる
+// rarity: 料理のレアリティ。食べたロボットはこの数だけローズ・トニックを払う
+// eatTimeMul: 食べるのにかかる時間の倍率
 GA.OBJECTS = {
   gomi: { name: 'ゴミ', category: 'material', desc: 'ガラクタの成れの果て。このままでは誰も食べない。' },
-  gomidango: { name: 'ゴミダンゴ', category: 'dish', rarity: 'common', desc: 'ゴミを練って丸めたもの。最初の料理。' },
+  moerugomi: { name: '燃えるゴミ', category: 'material', desc: '紙片や木くずの寄せ集め。' },
+  kinzokukuzu: { name: '金属くず', category: 'material', desc: '針金や金属片、小さな金属部品の寄せ集め。' },
+  scrap: { name: 'スクラップ', category: 'material', desc: '金属くずを厚みのある円盤状に固めたもの。' },
+  gomidango: { name: 'ゴミダンゴ', category: 'dish', rarity: 1, desc: 'ゴミを練って丸めたもの。最初の料理。' },
+  gomisalad: { name: 'ゴミサラダ', category: 'dish', rarity: 2, desc: '燃えるゴミをまとめたもの。緑が入っていて少し野菜っぽい。' },
+  slagpatty: { name: 'スラグパティ', category: 'dish', rarity: 4, eatTimeMul: 2, desc: '不純物まじりの鉄。食べ応えのある、ハンバーグを模した何か。食べるのに時間がかかる。' },
 };
 
-// 加工工程。recipes に無い入力は加工後に 'gomi' になる
+// 加工工程
+// type: transform = 1つを別の1つに変える / split = 1つを2つに分ける（recipes の値は [まっすぐ出る方, 横に出る方]）
+// onMissing: レシピに無いものが来たとき。gomi = ゴミに変える / pass = 何もせずまっすぐ流す
 GA.FALLBACK_OBJECT = 'gomi';
 GA.PROCESSES = {
-  neri: { name: '練り', recipes: { gomi: 'gomidango' } },
+  neri: { name: '練り', type: 'transform', onMissing: 'gomi', recipes: { gomi: 'gomidango', moerugomi: 'gomisalad' } },
+  press: { name: 'プレス', type: 'transform', onMissing: 'gomi', recipes: { kinzokukuzu: 'scrap' } },
+  chuuzou: { name: '鋳造', type: 'transform', onMissing: 'gomi', recipes: { scrap: 'slagpatty' } },
+  bunbetsu: { name: '分別', type: 'split', onMissing: 'pass', recipes: { gomi: ['moerugomi', 'kinzokukuzu'] } },
 };
 
 // 設備。kind は generator / conveyor / processor / storage / disposal / interior
@@ -53,6 +60,21 @@ GA.EQUIPMENT = {
     name: '練り機', kind: 'processor', directional: true, process: 'neri', workTime: 2.0, outTime: 0.6, price: 10,
     desc: '中に入ったものを「練り」、向いている方向へ出す。練れないものはゴミになる。',
   },
+  press_ki: {
+    name: 'プレス機', kind: 'processor', directional: true, process: 'press', workTime: 2.0, outTime: 0.6, price: 15,
+    color: '#6a6f7c',
+    desc: '中に入ったものを「プレス」し、向いている方向へ出す。プレスできないものはゴミになる。',
+  },
+  youkouro: {
+    name: '溶鉱炉', kind: 'processor', directional: true, process: 'chuuzou', workTime: 3.0, outTime: 0.6, price: 25,
+    color: '#7a4a3a',
+    desc: '中に入ったものを「鋳造」し、向いている方向へ出す。鋳造できないものはゴミになる。',
+  },
+  bunbetsu_ki: {
+    name: '分別機', kind: 'processor', directional: true, mirrorable: true, process: 'bunbetsu', workTime: 2.0, outTime: 0.6, price: 18,
+    color: '#4f6a5e',
+    desc: '中に入ったものを「分別」して2種類に分け、決まった片方をまっすぐ、もう片方を横へ出す。分別できないものは何もせずまっすぐ流す。',
+  },
   leisure_sheet: {
     name: 'レジャーシート', kind: 'storage', table: true, price: 6,
     desc: '食事テーブル。料理が乗るとロボットが食べに来る。',
@@ -79,7 +101,7 @@ GA.EQUIPMENT = {
 GA.LEGACY_TYPES = { sign: 'kyakuyose_kanban' };
 
 // ショップに並ぶ順番
-GA.SHOP_ORDER = ['gomi_container', 'bucket_conveyor', 'tire_conveyor', 'tire_sorter', 'neriki', 'leisure_sheet', 'basket', 'shredder', 'kyakuyose_kanban', 'koujichuu_kanban'];
+GA.SHOP_ORDER = ['gomi_container', 'bucket_conveyor', 'tire_conveyor', 'tire_sorter', 'neriki', 'press_ki', 'youkouro', 'bunbetsu_ki', 'leisure_sheet', 'basket', 'shredder', 'kyakuyose_kanban', 'koujichuu_kanban'];
 
 GA.CONFIG = {
   gridW: 11,

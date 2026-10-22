@@ -48,10 +48,25 @@
 
   const sideName = k => DIRS[k].name;
 
-  function sorterText(dir, mirror) {
-    const s = world.sorterSides({ dir, mirror });
+  // 向き＋左右反転を持つ設備の向きの説明
+  function branchText(type, dir, mirror) {
+    const s = world.branchSides({ dir, mirror });
+    if (GA.EQUIPMENT[type].kind === 'processor') return `まっすぐ ${sideName(dir)}／横 ${sideName(s.out)}`;
     return `本流の先 ${sideName(dir)}／仕分け先 ${sideName(s.out)}／比較マス ${sideName(s.ref)}`;
   }
+
+  const objName = t => GA.OBJECTS[t].name;
+
+  // 加工所のレシピ一覧
+  function recipeText(def) {
+    const proc = GA.PROCESSES[def.process];
+    const list = Object.entries(proc.recipes).map(([from, to]) =>
+      proc.type === 'split' ? `${objName(from)}→${objName(to[0])}（まっすぐ）＋${objName(to[1])}（横）` : `${objName(from)}→${objName(to)}`);
+    const rest = proc.onMissing === 'pass' ? 'それ以外は何もせずまっすぐ流す' : 'それ以外はゴミになる';
+    return `「${proc.name}」${list.join('、')}。${rest}。`;
+  }
+
+  const rarityText = od => od.rarity ? `／レアリティ ${od.rarity}・${od.rarity}トニック${od.eatTimeMul ? `・食べる時間×${od.eatTimeMul}` : ''}` : '';
 
   function placingMirrorable() {
     return ui.tool.kind === 'place' && GA.EQUIPMENT[ui.tool.type].mirrorable;
@@ -60,7 +75,7 @@
   // 回転ボタンの表示。仕分けコンベアは「本流の向き＋仕分け先の向き」
   function updateRotateBtn() {
     let label = DIRS[ui.dir].arrow;
-    if (placingMirrorable()) label += `<small>${DIRS[world.sorterSides({ dir: ui.dir, mirror: ui.mirror }).out].arrow}</small>`;
+    if (placingMirrorable()) label += `<small>${DIRS[world.branchSides({ dir: ui.dir, mirror: ui.mirror }).out].arrow}</small>`;
     $('rotate').innerHTML = label;
   }
 
@@ -68,7 +83,7 @@
     const t = ui.tool;
     if (t.kind === 'place') {
       const def = GA.EQUIPMENT[t.type];
-      const dir = def.mirrorable ? sorterText(ui.dir, ui.mirror) : `向き ${DIRS[ui.dir].arrow}`;
+      const dir = def.mirrorable ? branchText(t.type, ui.dir, ui.mirror) : `向き ${DIRS[ui.dir].arrow}`;
       return `<b>${def.name}</b>を置く（${dir}）。ドラッグで連続配置、置いてある設備をタップで回転。`;
     }
     if (t.kind === 'recall') return '<b>回収</b>：タップした設備をインベントリに戻す。上に乗っていたものはその場に残る。';
@@ -90,18 +105,20 @@
         dir = `（入口 ${list(ins)}／出口 ${list(outs)}）`;
       }
       if (def.mode === 'sorter') {
-        const ref = world.sorterSides(c.equip).ref;
+        const ref = world.branchSides(c.equip).ref;
         const rc = world.cell(x + DIRS[ref].x, y + DIRS[ref].y);
         const refObj = rc && rc.obj ? GA.OBJECTS[rc.obj.type].name : '空';
-        dir = `（${sorterText(c.equip.dir, c.equip.mirror)}・今は${refObj}）`;
+        dir = `（${branchText(c.equip.type, c.equip.dir, c.equip.mirror)}・今は${refObj}）`;
       }
-      parts.push(`<b>${def.name}</b>${dir}${limit}：${def.desc}`);
+      if (def.kind === 'processor' && def.mirrorable) dir = `（${branchText(c.equip.type, c.equip.dir, c.equip.mirror)}）`;
+      // 加工所は説明の代わりにレシピを出す
+      parts.push(`<b>${def.name}</b>${dir}${limit}：${def.kind === 'processor' ? recipeText(def) : def.desc}`);
+      if (c.equip.pending) parts.push(`横の出口で<b>${objName(c.equip.pending.type)}</b>が待っている。`);
       if (world.junctionError(x, y)) parts.push('<b>エラー</b>：4方向すべてが入口、またはすべてが出口になっているため止まっている。周りのタイヤコンベアの向きを変えてほしい。');
     }
     if (c.obj) {
       const od = GA.OBJECTS[c.obj.type];
-      const rare = od.rarity ? `／${GA.RARITIES[od.rarity].name}・${GA.RARITIES[od.rarity].tonic}トニック` : '';
-      parts.push(`<b>${od.name}</b>${rare}：${od.desc}`);
+      parts.push(`<b>${od.name}</b>${rarityText(od)}：${od.desc}`);
     }
     if (!parts.length) parts.push('何も無い地面。');
     return parts.join('<br>');
@@ -211,7 +228,7 @@
       const text = document.createElement('div');
       text.className = 'shop-text';
       const limit = def.maxPlaced ? `<span class="owned">設置上限 ${def.maxPlaced}</span>` : '';
-      text.innerHTML = `<div class="shop-name">${def.name}<span class="owned">在庫 ${world.inv[type] || 0}</span>${limit}</div><div class="shop-desc">${def.desc}</div>`;
+      text.innerHTML = `<div class="shop-name">${def.name}<span class="owned">在庫 ${world.inv[type] || 0}</span>${limit}</div><div class="shop-desc">${def.desc}${def.kind === 'processor' ? '<br>' + recipeText(def) : ''}</div>`;
       const btns = document.createElement('div');
       btns.className = 'shop-btns';
       const buy = document.createElement('button');
@@ -363,6 +380,13 @@
     if (ui.tool.kind !== 'place') return;
     e.preventDefault();
     rotate(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
+
+  // 道具の棚は横に長いので、ホイールで横スクロールできるようにする
+  $('tools').addEventListener('wheel', e => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    e.preventDefault();
+    $('tools').scrollLeft += e.deltaY;
   }, { passive: false });
 
   window.addEventListener('keydown', e => {

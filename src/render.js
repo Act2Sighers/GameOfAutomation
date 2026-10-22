@@ -218,8 +218,14 @@
         }
         case 'processor': {
           g.fillStyle = COL.metalDark; this.rr(g, px + cs * 0.06, py + cs * 0.1, cs * 0.88, cs * 0.84, cs * 0.14); g.fill();
-          g.fillStyle = COL.metal; this.rr(g, px + cs * 0.08, py + cs * 0.06, cs * 0.84, cs * 0.8, cs * 0.14); g.fill();
+          g.fillStyle = def.color || COL.metal; this.rr(g, px + cs * 0.08, py + cs * 0.06, cs * 0.84, cs * 0.8, cs * 0.14); g.fill();
           g.fillStyle = COL.metalDark; g.beginPath(); g.arc(cx, cy - cs * 0.02, cs * 0.28, 0, Math.PI * 2); g.fill();
+          if (def.process === 'chuuzou') {
+            // 炉の火
+            const glow = 0.55 + Math.sin(time * 5 + x + y) * 0.15;
+            g.fillStyle = `rgba(255,122,40,${glow})`;
+            g.beginPath(); g.arc(cx, cy - cs * 0.02, cs * 0.2, 0, Math.PI * 2); g.fill();
+          }
           break;
         }
         case 'storage': {
@@ -275,6 +281,12 @@
         g.textAlign = 'center'; g.textBaseline = 'middle';
         g.fillText(GA.PROCESSES[def.process].name, cx, py + cs * 0.2);
         this.drawOutArrow(g, cx, cy, DIRS[e.dir], COL.paper);
+        if (def.mirrorable) {
+          const side = DIRS[this.world.branchSides(e).out];
+          this.drawOutArrow(g, cx, cy, side, '#e8d27a');
+          // 分けた2つ目は横の出口の近くで待つ
+          if (e.pending) this.drawObj(g, e.pending.type, cx + side.x * cs * 0.26, cy + side.y * cs * 0.26, cs * 0.15, e.pending.id);
+        }
       }
       if (def.kind === 'disposal' && cell && cell.obj) {
         const k = Math.min(1, cell.obj.work / def.workTime);
@@ -369,7 +381,7 @@
       const cs = this.cs, px = this.sx(x), py = this.sy(y);
       const cx = px + cs / 2, cy = py + cs / 2;
       const def = GA.EQUIPMENT[e.type];
-      const sides = this.world.sorterSides(e);
+      const sides = this.world.branchSides(e);
       const TIRE = ['#1f2022', '#3a3c3f', '#5d6064'];
       const SORT = ['#1f2022', '#6b5a2a', '#c9a43a'];
       this.drawBand(g, cx, cy, null, sides.out, time, def.moveTime, SORT, [0.5, 0.4, 0.3]);
@@ -388,7 +400,7 @@
     // 仕分けコンベアの比較マスを点線で示す
     drawSorterRef(g, e, x, y) {
       const cs = this.cs;
-      const r = DIRS[this.world.sorterSides(e).ref];
+      const r = DIRS[this.world.branchSides(e).ref];
       const rx = x + r.x, ry = y + r.y;
       if (!this.world.inBounds(rx, ry)) return;
       g.strokeStyle = 'rgba(201,164,58,0.9)';
@@ -438,9 +450,81 @@
         for (let i = 0; i < 4; i++) { g.beginPath(); g.arc(x + (rnd() - 0.5) * r, y + (rnd() - 0.5) * r, r * 0.12, 0, Math.PI * 2); g.fill(); }
         g.fillStyle = 'rgba(255,240,210,0.45)';
         g.beginPath(); g.arc(x - r * 0.3, y - r * 0.35, r * 0.22, 0, Math.PI * 2); g.fill();
+      } else if (type === 'moerugomi') {
+        // 紙片と木くずの寄せ集め
+        g.fillStyle = '#8b7a5c';
+        this.blob(g, x, y, r, rnd);
+        g.fill();
+        for (let i = 0; i < 4; i++) {
+          g.fillStyle = i % 2 ? '#e6dcc4' : '#a5763f';
+          g.save();
+          g.translate(x + (rnd() - 0.5) * r * 1.1, y + (rnd() - 0.5) * r * 0.9);
+          g.rotate(rnd() * Math.PI);
+          g.fillRect(-r * 0.28, -r * 0.1, r * 0.56, r * 0.2);
+          g.restore();
+        }
+      } else if (type === 'kinzokukuzu') {
+        // 金属片と針金
+        g.fillStyle = '#5e6670';
+        this.blob(g, x, y, r * 0.85, rnd);
+        g.fill();
+        g.fillStyle = '#9aa6b0';
+        g.fillRect(x - r * 0.5, y - r * 0.2, r * 0.4, r * 0.3);
+        g.beginPath(); g.arc(x + r * 0.3, y + r * 0.2, r * 0.18, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = '#c0c8cf'; g.lineWidth = Math.max(1, r * 0.1);
+        g.beginPath();
+        g.moveTo(x - r * 0.7, y + r * 0.4);
+        g.bezierCurveTo(x - r * 0.2, y - r * 0.6, x + r * 0.2, y + r * 0.8, x + r * 0.8, y - r * 0.3);
+        g.stroke();
+      } else if (type === 'scrap') {
+        // 厚みのある円盤
+        g.fillStyle = '#3e454c';
+        g.beginPath(); g.ellipse(x, y + r * 0.22, r * 0.95, r * 0.55, 0, 0, Math.PI * 2); g.fill();
+        g.fillRect(x - r * 0.95, y - r * 0.1, r * 1.9, r * 0.32);
+        g.fillStyle = '#8a949c';
+        g.beginPath(); g.ellipse(x, y - r * 0.1, r * 0.95, r * 0.55, 0, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = '#5e6670'; g.lineWidth = Math.max(1, r * 0.08);
+        g.beginPath(); g.ellipse(x, y - r * 0.1, r * 0.6, r * 0.33, 0, 0, Math.PI * 2); g.stroke();
+      } else if (type === 'gomisalad') {
+        // 燃えるゴミの山に緑
+        g.fillStyle = 'rgba(0,0,0,0.25)';
+        g.beginPath(); g.ellipse(x, y + r * 0.7, r * 0.9, r * 0.28, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#9c8458';
+        g.beginPath(); g.ellipse(x, y + r * 0.1, r * 0.95, r * 0.7, 0, 0, Math.PI * 2); g.fill();
+        for (let i = 0; i < 5; i++) {
+          g.fillStyle = i % 2 ? '#5f9a4a' : '#8cc06a';
+          g.beginPath(); g.ellipse(x + (rnd() - 0.5) * r * 1.2, y + (rnd() - 0.6) * r * 0.9, r * 0.3, r * 0.17, rnd() * Math.PI, 0, Math.PI * 2); g.fill();
+        }
+        g.fillStyle = '#d64a3a';
+        g.beginPath(); g.arc(x + r * 0.25, y - r * 0.05, r * 0.13, 0, Math.PI * 2); g.fill();
+      } else if (type === 'slagpatty') {
+        // ハンバーグ風の鉄の塊
+        g.fillStyle = 'rgba(0,0,0,0.3)';
+        g.beginPath(); g.ellipse(x, y + r * 0.65, r * 0.95, r * 0.28, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#4a2f24';
+        g.beginPath(); g.ellipse(x, y + r * 0.1, r * 0.95, r * 0.62, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#6b4433';
+        g.beginPath(); g.ellipse(x - r * 0.05, y, r * 0.8, r * 0.48, 0, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = '#2b1a14'; g.lineWidth = Math.max(1, r * 0.1);
+        for (let i = -1; i <= 1; i++) { g.beginPath(); g.moveTo(x - r * 0.5 + i * r * 0.3, y - r * 0.25); g.lineTo(x - r * 0.1 + i * r * 0.3, y + r * 0.3); g.stroke(); }
+        g.fillStyle = '#ff8a3a';
+        for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(x + (rnd() - 0.5) * r, y + (rnd() - 0.5) * r * 0.5, r * 0.07, 0, Math.PI * 2); g.fill(); }
       } else {
         g.fillStyle = '#ccc'; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
       }
+    }
+
+    // でこぼこした塊の輪郭（パスだけ作る）
+    blob(g, x, y, r, rnd) {
+      g.beginPath();
+      const n = 8;
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2;
+        const rr = r * (0.75 + rnd() * 0.35);
+        const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr * 0.8;
+        i ? g.lineTo(px, py) : g.moveTo(px, py);
+      }
+      g.closePath();
     }
 
     drawTonicDrop(g, x, y, r) {

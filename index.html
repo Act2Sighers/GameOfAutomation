@@ -98,7 +98,7 @@
   .tool {
     position: relative; flex: none;
     display: grid; justify-items: center; align-content: center; gap: 3px;
-    width: 76px; min-height: 64px; padding: 6px 4px;
+    width: 72px; min-height: 64px; padding: 6px 4px;
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
   }
   .tool[aria-pressed="true"] { border-color: var(--brass); box-shadow: inset 0 0 0 1px var(--brass); }
@@ -166,7 +166,7 @@
 </style>
 
 <header>
-  <div class="brand">ガラクタ姫の異食レストラン<small>試作 0.4</small></div>
+  <div class="brand">ガラクタ姫の異食レストラン<small>試作 0.5</small></div>
   <div class="stat tonic" title="ローズ・トニック">
     <svg viewBox="0 0 14 18" aria-hidden="true"><path d="M7 0C10 5 13 8 13 11.5A6 6 0 0 1 1 11.5C1 8 4 5 7 0Z" fill="#c3123f"/><circle cx="4.6" cy="11.6" r="1.4" fill="#ffffff" opacity=".5"/></svg>
     <span id="tonic">0</span>
@@ -217,6 +217,8 @@
       <li>下の棚から設備を選び、空きマスを<b>タップ</b>で配置。<b>ドラッグ</b>するとその方向に向けて連続配置。</li>
       <li><b>見る・回す・運ぶ</b>モードで設備をタップすると<b>回転</b>。同じ設備を選んでタップしても回転、違う設備なら入れ替え。</li>
       <li><b>見る・回す・運ぶ</b>モードでオブジェクトを<b>ドラッグ</b>すると、空いているマスへ運べる。置けないマスで離すと元の場所に戻る。</li>
+      <li><b>分別機</b>は分けた2つを白い矢印（まっすぐ）と黄色い矢印（横）に決まった組み合わせで出す。分別できないものは何もせずまっすぐ流す。</li>
+      <li>加工所をタップすると、何を何に変えるかが下に表示される。</li>
       <li><b>バスケット</b>の上のものには、ロボットは手を出さない。仕分けコンベアの比較マスに便利。</li>
       <li><b>工事中看板</b>を置いている間は客が来ない。配置に集中したいときに。</li>
       <li>向きは右下の矢印ボタン、<b>R</b> キー、右クリック、ホイールで回せる。仕分けコンベアは向き4つ×左右反転の<b>8段階</b>で一周する。</li>
